@@ -1,0 +1,33 @@
+{
+  "name": "desktop",
+  "productName": "Amend",
+  "version": "0.0.1",
+  "description": "Local-first, self-maintaining wiki",
+  "private": true,
+  "main": ".vite/build/main.js",
+  "scripts": {
+    "dev": "wait-on http-get://127.0.0.1:3000 && electron-forge start",
+    "build": "vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/**/*.test.ts",
+    "package": "electron-forge package",
+    "make": "electron-forge make"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/maker-zip": "7.11.2",
+    "@electron-forge/plugin-fuses": "7.11.2",
+    "@electron-forge/plugin-vite": "7.11.2",
+    "@electron-forge/shared-types": "7.11.2",
+    "@electron/fuses": "1.8.0",
+    "@tanstack/eslint-config": "0.4.0",
+    "@types/node": "22.19.15",
+    "electron": "43.1.1",
+    "eslint": "10.0.1",
+    "tsx": "4.21.0",
+    "typescript": "6.0.3",
+    "vite": "8.1.5",
+    "wait-on": "9.0.4"
+  }
+}
