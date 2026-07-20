@@ -118,7 +118,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --font-sans: "Geist Variable", sans-serif;
-  --font-heading: "Geist Mono Variable", monospace;
+  --font-heading: "Geist Variable", sans-serif;
 }
 
 @layer base {

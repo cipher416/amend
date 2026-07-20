@@ -14,6 +14,7 @@
     "types": ["vite/client"],
     "paths": {
       "@/*": ["./src/*"],
+      "@workspace/contract": ["../../packages/contract/src/index.ts"],
       "@workspace/ui/*": ["../../packages/ui/src/*"]
     },
     "moduleResolution": "bundler",
