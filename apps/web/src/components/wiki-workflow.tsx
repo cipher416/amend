@@ -11,6 +11,7 @@ import { Spinner } from "@workspace/ui/components/spinner"
 
 import { errorMessage, getAmendApi } from "@/lib/amend-client"
 
+import { PiConnectStep } from "./pi-connect-step"
 import { WikiReadyStep } from "./wiki-ready-step"
 import { WikiSetupStep } from "./wiki-setup-step"
 import { WorkflowShell } from "./wiki-workflow-ui"
@@ -21,6 +22,7 @@ type BusyOperation =
 interface WorkflowState {
   desktop: AmendApi | null | undefined
   recovered: boolean
+  piConfigured?: boolean
   busy: BusyOperation
   error?: string
   selection?: WorkspaceParentSelection
@@ -39,9 +41,11 @@ type WorkflowAction =
   | { type: "desktop-loaded"; desktop: AmendApi | null }
   | {
       type: "session-recovered"
+      piConfigured: boolean
       workspace: WorkspaceSummary | null
       job: WikiIngestJob | null
     }
+  | { type: "pi-connected" }
   | { type: "field-changed"; field: EditableField; value: string }
   | { type: "operation-started"; operation: Exclude<BusyOperation, null> }
   | { type: "operation-finished" }
@@ -220,7 +224,12 @@ export function WikiWorkflow() {
 
   return (
     <WorkflowShell>
-      {state.job?.status === "completed" && state.job.result ? (
+      {!state.piConfigured ? (
+        <PiConnectStep
+          api={api}
+          onConnected={() => dispatch({ type: "pi-connected" })}
+        />
+      ) : state.job?.status === "completed" && state.job.result ? (
         <WikiReadyStep
           workspace={state.workspace}
           ingest={state.job.result}
@@ -260,7 +269,8 @@ async function recoverSession(
   dispatch: React.Dispatch<WorkflowAction>
 ): Promise<void> {
   try {
-    const [workspace, job] = await Promise.all([
+    const [status, workspace, job] = await Promise.all([
+      api.pi.status(),
       api.workspace.current(),
       api.wiki.currentIngest(),
     ])
@@ -272,6 +282,7 @@ async function recoverSession(
     }
     dispatch({
       type: "session-recovered",
+      piConfigured: status.ok && status.value.configured,
       workspace: workspace.ok ? workspace.value : null,
       job: job.ok ? job.value : null,
     })
@@ -279,6 +290,7 @@ async function recoverSession(
     dispatch({ type: "operation-failed", message: errorMessage(cause) })
     dispatch({
       type: "session-recovered",
+      piConfigured: false,
       workspace: null,
       job: null,
     })
@@ -305,11 +317,14 @@ function workflowReducer(
         {
           ...state,
           recovered: true,
+          piConfigured: action.piConfigured,
           workspace: action.workspace ?? undefined,
         },
         recoveredJob
       )
     }
+    case "pi-connected":
+      return { ...state, piConfigured: true }
     case "field-changed":
       return { ...state, [action.field]: action.value }
     case "operation-started":

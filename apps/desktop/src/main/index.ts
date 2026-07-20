@@ -3,7 +3,8 @@ import { fileURLToPath } from "node:url"
 
 import { app, BrowserWindow, session } from "electron"
 
-import { registerWikiIpc } from "./ipc"
+import { registerPiIpc, registerWikiIpc } from "./ipc"
+import { PiCredentialService } from "./pi-credential-service"
 import { registerRendererProtocol } from "./renderer-protocol"
 import { rendererOrigin } from "./renderer-path"
 import { resolveWikiSkillPath } from "./resource-paths"
@@ -14,7 +15,9 @@ const developmentRendererUrl = "http://127.0.0.1:3001"
 const mainDirectory = path.dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
 let workspaceService: WorkspaceService | undefined
+let piCredentialService: PiCredentialService | undefined
 let disposeIpc: (() => void) | undefined
+let disposePiIpc: (() => void) | undefined
 let shutdownStarted = false
 let shutdownComplete = false
 
@@ -59,14 +62,16 @@ function createWindow() {
        nodeType: typeof window.process,
        runtime: window.amend?.runtime,
        hasWorkspaceApi: typeof window.amend?.workspace?.create === "function",
-       hasWikiApi: typeof window.amend?.wiki?.search === "function"
+       hasWikiApi: typeof window.amend?.wiki?.search === "function",
+       hasPiApi: typeof window.amend?.pi?.status === "function"
      })`)
     const passed =
       result.origin === rendererOrigin &&
       result.nodeType === "undefined" &&
       result.runtime === "electron" &&
       result.hasWorkspaceApi === true &&
-      result.hasWikiApi === true
+      result.hasWikiApi === true &&
+      result.hasPiApi === true
 
     console.log("AMEND_SMOKE_RESULT", JSON.stringify(result))
     app.exit(passed ? 0 : 1)
@@ -107,6 +112,12 @@ app.whenReady().then(async () => {
     allowedOrigin,
     getWindow: () => mainWindow,
   })
+  piCredentialService = new PiCredentialService()
+  disposePiIpc = registerPiIpc({
+    service: piCredentialService,
+    allowedOrigin,
+    getWindow: () => mainWindow,
+  })
   createWindow()
 
   app.on("activate", () => {
@@ -122,6 +133,8 @@ app.on("before-quit", (event) => {
   if (shutdownStarted) return
   shutdownStarted = true
   void workspaceService.dispose().finally(() => {
+    piCredentialService?.dispose()
+    disposePiIpc?.()
     disposeIpc?.()
     shutdownComplete = true
     app.quit()

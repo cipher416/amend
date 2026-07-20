@@ -4,11 +4,22 @@ import {
   isCreateWorkspaceInput,
   isCancelIngestInput,
   isIngestDocumentInput,
+  isPiCancelLoginInput,
+  isPiListModelsInput,
+  isPiRespondToPromptInput,
+  isPiSaveApiKeyInput,
+  isPiSetDefaultModelInput,
+  isStartPiOAuthLoginInput,
   isWikiSearchInput,
 } from "./index.ts"
 import {
   isAmendResult,
+  isPiConnectionStatus,
+  isPiLoginEvent,
+  isPiModelSummaries,
+  isPiProviderSummaries,
   isSourceDocumentSelectionOrNull,
+  isStartPiOAuthLoginResult,
   isWikiIngestJob,
   isWikiProgressEvent,
   isWorkspaceSummary,
@@ -107,6 +118,83 @@ describe("desktop contract validation", () => {
         revision: 3,
         cancellable: false,
       })
+    ).toBe(false)
+  })
+})
+
+describe("Pi credential contract validation", () => {
+  it("accepts valid Pi requests", () => {
+    expect(isPiListModelsInput({ provider: "zai" })).toBe(true)
+    expect(isStartPiOAuthLoginInput({ provider: "anthropic" })).toBe(true)
+    expect(isStartPiOAuthLoginInput({ provider: "openai-codex" })).toBe(true)
+    expect(
+      isPiSaveApiKeyInput({ provider: "zai", apiKey: "sk-example-key" })
+    ).toBe(true)
+    expect(
+      isPiSetDefaultModelInput({ provider: "zai", model: "glm-5-turbo" })
+    ).toBe(true)
+    expect(
+      isPiRespondToPromptInput({
+        loginId: "a1b2c3d4",
+        promptId: "e5f6a7b8",
+        value: "123456",
+      })
+    ).toBe(true)
+    expect(isPiCancelLoginInput({ loginId: "a1b2c3d4" })).toBe(true)
+  })
+
+  it("rejects unsupported OAuth providers and unsafe provider ids", () => {
+    expect(isStartPiOAuthLoginInput({ provider: "github-copilot" })).toBe(false)
+    expect(isPiListModelsInput({ provider: "../escape" })).toBe(false)
+    expect(isPiListModelsInput({ provider: "Zai" })).toBe(false)
+    expect(isPiSaveApiKeyInput({ provider: "zai", apiKey: "   " })).toBe(false)
+  })
+
+  it("validates Pi status, provider, model, and login-event responses", () => {
+    expect(isPiConnectionStatus({ configured: false })).toBe(true)
+    expect(
+      isPiConnectionStatus({
+        configured: true,
+        provider: "zai",
+        model: "glm-5-turbo",
+      })
+    ).toBe(true)
+    expect(isPiConnectionStatus({ configured: true, secret: "leak" })).toBe(
+      false
+    )
+
+    expect(
+      isPiProviderSummaries([{ id: "zai", name: "ZAI Coding Plan (Global)" }])
+    ).toBe(true)
+    expect(
+      isPiModelSummaries([{ id: "glm-5-turbo", name: "GLM-5-Turbo" }])
+    ).toBe(true)
+    expect(isStartPiOAuthLoginResult({ loginId: "a1b2c3d4" })).toBe(true)
+
+    expect(
+      isPiLoginEvent({
+        loginId: "a1b2c3d4",
+        type: "auth",
+        url: "https://example.com/authorize",
+      })
+    ).toBe(true)
+    expect(
+      isPiLoginEvent({
+        loginId: "a1b2c3d4",
+        type: "prompt",
+        promptId: "e5f6a7b8",
+        message: "Paste the code from your browser",
+      })
+    ).toBe(true)
+    expect(
+      isPiLoginEvent({
+        loginId: "a1b2c3d4",
+        type: "failed",
+        error: { code: "pi-failed", message: "Could not connect." },
+      })
+    ).toBe(true)
+    expect(
+      isPiLoginEvent({ loginId: "a1b2c3d4", type: "completed", extra: true })
     ).toBe(false)
   })
 })

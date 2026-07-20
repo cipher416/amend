@@ -2,9 +2,14 @@ import { amendChannels } from "@workspace/contract/channels"
 import {
   isAmendResult,
   isNull,
+  isPiConnectionStatus,
+  isPiLoginEvent,
+  isPiModelSummaries,
+  isPiProviderSummaries,
   isSourceDocumentSelection,
   isSourceDocumentSelectionOrNull,
   isStartIngestResult,
+  isStartPiOAuthLoginResult,
   isWikiIndexRefreshSummary,
   isWikiIngestJob,
   isWikiIngestJobOrNull,
@@ -21,6 +26,13 @@ import type {
   CancelIngestInput,
   CreateWorkspaceInput,
   IngestDocumentInput,
+  PiCancelLoginInput,
+  PiListModelsInput,
+  PiLoginEvent,
+  PiRespondToPromptInput,
+  PiSaveApiKeyInput,
+  PiSetDefaultModelInput,
+  StartPiOAuthLoginInput,
   WikiIngestJob,
   WikiSearchInput,
   WorkspaceParentSelection,
@@ -37,6 +49,33 @@ const workspace = Object.freeze({
     invoke(amendChannels.createWorkspace, isWorkspaceSummary, input),
   current: () =>
     invoke(amendChannels.getCurrentWorkspace, isWorkspaceSummaryOrNull),
+})
+
+const pi = Object.freeze({
+  status: () => invoke(amendChannels.piStatus, isPiConnectionStatus),
+  listApiKeyProviders: () =>
+    invoke(amendChannels.listPiApiKeyProviders, isPiProviderSummaries),
+  listModels: (input: PiListModelsInput) =>
+    invoke(amendChannels.listPiModels, isPiModelSummaries, input),
+  startOAuthLogin: (input: StartPiOAuthLoginInput) =>
+    invoke(amendChannels.startPiOAuthLogin, isStartPiOAuthLoginResult, input),
+  respondToPrompt: (input: PiRespondToPromptInput) =>
+    invoke(amendChannels.respondToPiPrompt, isNull, input),
+  cancelLogin: (input: PiCancelLoginInput) =>
+    invoke(amendChannels.cancelPiLogin, isNull, input),
+  saveApiKeyCredential: (input: PiSaveApiKeyInput) =>
+    invoke(amendChannels.savePiApiKeyCredential, isNull, input),
+  setDefaultModel: (input: PiSetDefaultModelInput) =>
+    invoke(amendChannels.setPiDefaultModel, isNull, input),
+  onLoginEvent(listener: (event: PiLoginEvent) => void) {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      if (isPiLoginEvent(payload)) listener(payload)
+    }
+    ipcRenderer.on(amendChannels.piLoginEvent, wrapped)
+    return () => {
+      ipcRenderer.removeListener(amendChannels.piLoginEvent, wrapped)
+    }
+  },
 })
 
 const wiki = Object.freeze({
@@ -96,6 +135,7 @@ const amendApi = Object.freeze({
   runtime: "electron" as const,
   platform: process.platform,
   workspace,
+  pi,
   wiki,
 }) satisfies AmendApi
 

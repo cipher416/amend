@@ -2,6 +2,12 @@ import {
   isCancelIngestInput,
   isCreateWorkspaceInput,
   isIngestDocumentInput,
+  isPiCancelLoginInput,
+  isPiListModelsInput,
+  isPiRespondToPromptInput,
+  isPiSaveApiKeyInput,
+  isPiSetDefaultModelInput,
+  isStartPiOAuthLoginInput,
   isWikiSearchInput,
 } from "@workspace/contract"
 import { amendChannels } from "@workspace/contract/channels"
@@ -9,6 +15,7 @@ import type { AmendError, AmendResult } from "@workspace/contract"
 import { dialog, ipcMain } from "electron"
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron"
 
+import type { PiCredentialService } from "./pi-credential-service"
 import { isAllowedIpcSender } from "./security"
 import { WorkspaceServiceError } from "./workspace-service"
 import type { WorkspaceService } from "./workspace-service"
@@ -20,6 +27,10 @@ interface IpcAuthContext {
 
 interface WikiIpcOptions extends IpcAuthContext {
   service: WorkspaceService
+}
+
+interface PiIpcOptions extends IpcAuthContext {
+  service: PiCredentialService
 }
 
 export function registerWikiIpc(options: WikiIpcOptions): () => void {
@@ -172,6 +183,116 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
       amendChannels.refreshWikiIndex,
       amendChannels.searchWiki,
       amendChannels.listWikiTags,
+    ]) {
+      ipcMain.removeHandler(channel)
+    }
+  }
+}
+
+export function registerPiIpc(options: PiIpcOptions): () => void {
+  const unsubscribeLogin = options.service.subscribeLoginEvents((event) => {
+    const window = options.getWindow()
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(amendChannels.piLoginEvent, event)
+    }
+  })
+
+  ipcMain.handle(
+    amendChannels.piStatus,
+    authorized(
+      options,
+      async () => await attempt(async () => options.service.status())
+    )
+  )
+
+  ipcMain.handle(
+    amendChannels.listPiApiKeyProviders,
+    authorized(
+      options,
+      async () =>
+        await attempt(async () => options.service.listApiKeyProviders())
+    )
+  )
+
+  ipcMain.handle(
+    amendChannels.listPiModels,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isPiListModelsInput(input)) return invalidInput()
+      return await attempt(async () =>
+        options.service.listModels(input.provider)
+      )
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.startPiOAuthLogin,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isStartPiOAuthLoginInput(input)) return invalidInput()
+      return await attempt(async () =>
+        options.service.startOAuthLogin(input.provider)
+      )
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.respondToPiPrompt,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isPiRespondToPromptInput(input)) return invalidInput()
+      return await attempt(async () => {
+        options.service.respondToPrompt(
+          input.loginId,
+          input.promptId,
+          input.value
+        )
+        return null
+      })
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.cancelPiLogin,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isPiCancelLoginInput(input)) return invalidInput()
+      return await attempt(async () => {
+        options.service.cancelLogin(input.loginId)
+        return null
+      })
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.savePiApiKeyCredential,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isPiSaveApiKeyInput(input)) return invalidInput()
+      return await attempt(async () => {
+        options.service.saveApiKeyCredential(input.provider, input.apiKey)
+        return null
+      })
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.setPiDefaultModel,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isPiSetDefaultModelInput(input)) return invalidInput()
+      return await attempt(async () => {
+        await options.service.setDefaultModel(input.provider, input.model)
+        return null
+      })
+    })
+  )
+
+  return () => {
+    unsubscribeLogin()
+    for (const channel of [
+      amendChannels.piStatus,
+      amendChannels.listPiApiKeyProviders,
+      amendChannels.listPiModels,
+      amendChannels.startPiOAuthLogin,
+      amendChannels.respondToPiPrompt,
+      amendChannels.cancelPiLogin,
+      amendChannels.savePiApiKeyCredential,
+      amendChannels.setPiDefaultModel,
     ]) {
       ipcMain.removeHandler(channel)
     }

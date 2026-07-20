@@ -36,3 +36,34 @@ only the static client output and load it through the secure `app://amend/`
 protocol; the Start server bundle is not packaged or started. Electron-only
 capabilities must remain behind typed preload IPC. Do not use runtime Start
 server functions for Git, filesystem, database, credentials, or model access.
+
+## Connecting a Model Provider
+
+Before the first wiki can be created, Amend needs a Pi model provider
+connected. If `~/.pi/agent/settings.json` does not already name a provider with
+stored credentials, onboarding shows a connect step instead of the workspace
+form. From there, users can:
+
+- Sign in with Anthropic (Claude Pro/Max) or ChatGPT Plus/Pro (Codex) through a
+  browser-based OAuth flow. Amend opens the system browser and, if the
+  automatic redirect does not complete, prompts for a manually pasted code.
+- Enter a plain API key for any other provider the Pi model registry knows
+  about (OpenAI, Z.ai, Google, Mistral, and more).
+
+Either path ends with picking a default model for that provider, which Amend
+writes to `~/.pi/agent/settings.json` alongside the credential in
+`~/.pi/agent/auth.json`. Credential storage, OAuth token exchange, and browser
+launching all happen in the Electron main process; the renderer only ever sees
+provider ids, model ids, and login-progress events.
+
+## First Ingest
+
+Creating a wiki requires Git on the desktop application's `PATH`. The first
+source can be a PDF, Markdown file, or UTF-8 text file up to 25 MB; selection
+and text extraction stay in the Electron main process. Ingest uses the default
+provider and model in `~/.pi/agent/settings.json`, with credentials resolved by
+Pi from its auth storage. Amend bundles its pinned wiki-maintenance skill;
+source material, credentials, Git, and the SQLite search index remain in the
+Electron main process. Ingest runs as a main-process job, so renderer reloads
+reconnect to its latest status. Jobs live only for the current application
+session, and can be cancelled until Git commit promotion begins.

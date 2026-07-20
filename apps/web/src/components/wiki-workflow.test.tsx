@@ -6,6 +6,7 @@ import type {
   AmendApi,
   AmendResult,
   IngestPastedSourceResult,
+  PiLoginEvent,
   WikiIngestJob,
   WorkspaceSummary,
 } from "@workspace/contract"
@@ -102,19 +103,81 @@ describe("first source workflow", () => {
   })
 })
 
+describe("Pi connection gate", () => {
+  it("blocks onboarding until a model provider is connected", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi({ piConfigured: false })
+    api.pi.listApiKeyProviders = vi.fn(async () =>
+      success([{ id: "zai", name: "ZAI Coding Plan (Global)" }])
+    )
+    api.pi.listModels = vi.fn(async () =>
+      success([{ id: "glm-5-turbo", name: "GLM-5-Turbo" }])
+    )
+    window.amend = api
+    render(<WikiWorkflow />)
+
+    await screen.findByText("Connect a model provider")
+    expect(screen.queryByText("Create a knowledge base")).toBeNull()
+
+    await user.click(
+      screen.getByRole("button", { name: "Or connect with an API key" })
+    )
+    await screen.findByLabelText("Provider")
+    await user.selectOptions(screen.getByLabelText("Provider"), "zai")
+    await user.type(screen.getByLabelText("API key"), "sk-test-key")
+    await user.click(screen.getByRole("button", { name: "Save and continue" }))
+
+    await screen.findByLabelText("Default model")
+    expect(api.pi.saveApiKeyCredential).toHaveBeenCalledWith({
+      provider: "zai",
+      apiKey: "sk-test-key",
+    })
+
+    await user.selectOptions(
+      screen.getByLabelText("Default model"),
+      "glm-5-turbo"
+    )
+    await user.click(screen.getByRole("button", { name: "Continue" }))
+
+    expect(api.pi.setDefaultModel).toHaveBeenCalledWith({
+      provider: "zai",
+      model: "glm-5-turbo",
+    })
+    await screen.findByText("Create a knowledge base")
+  })
+})
+
 function createDesktopApi(
   options: {
     workspace?: WorkspaceSummary
     job?: WikiIngestJob
     index?: IngestPastedSourceResult["index"]
+    piConfigured?: boolean
   } = {}
 ): AmendApi {
   let workspace = options.workspace ?? null
   let currentJob = options.job ?? null
   const listeners = new Set<(job: WikiIngestJob) => void>()
+  const piListeners = new Set<(event: PiLoginEvent) => void>()
   const api: AmendApi = {
     runtime: "electron",
     platform: "linux",
+    pi: {
+      status: vi.fn(async () =>
+        success({ configured: options.piConfigured ?? true })
+      ),
+      listApiKeyProviders: vi.fn(async () => success([])),
+      listModels: vi.fn(async () => success([])),
+      startOAuthLogin: vi.fn(async () => success({ loginId: "login-id" })),
+      respondToPrompt: vi.fn(async () => success(null)),
+      cancelLogin: vi.fn(async () => success(null)),
+      saveApiKeyCredential: vi.fn(async () => success(null)),
+      setDefaultModel: vi.fn(async () => success(null)),
+      onLoginEvent: vi.fn((listener) => {
+        piListeners.add(listener)
+        return () => piListeners.delete(listener)
+      }),
+    },
     workspace: {
       chooseParent: vi.fn(async () =>
         success({

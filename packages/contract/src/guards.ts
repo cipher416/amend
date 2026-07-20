@@ -3,8 +3,13 @@ import type {
   AmendErrorCode,
   AmendResult,
   IngestPastedSourceResult,
+  PiConnectionStatus,
+  PiLoginEvent,
+  PiModelSummary,
+  PiProviderSummary,
   SourceDocumentSelection,
   StartIngestResult,
+  StartPiOAuthLoginResult,
   WikiIngestJob,
   WikiIndexRefreshSummary,
   WikiProgressEvent,
@@ -219,6 +224,97 @@ export const isWikiTagFacets: Guard<readonly WikiTagFacet[]> = (
       isString(facet.tag) &&
       isNumber(facet.count)
   )
+
+export const isPiConnectionStatus: Guard<PiConnectionStatus> = (
+  value
+): value is PiConnectionStatus =>
+  isRecord(value) &&
+  hasOnlyKeys(value, ["configured", "provider", "model"]) &&
+  typeof value.configured === "boolean" &&
+  (value.provider === undefined || isString(value.provider)) &&
+  (value.model === undefined || isString(value.model))
+
+function isPiProviderSummary(value: unknown): value is PiProviderSummary {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["id", "name"]) &&
+    isString(value.id) &&
+    isString(value.name)
+  )
+}
+
+export const isPiProviderSummaries: Guard<readonly PiProviderSummary[]> = (
+  value
+): value is readonly PiProviderSummary[] =>
+  Array.isArray(value) && value.every(isPiProviderSummary)
+
+export const isPiModelSummaries: Guard<readonly PiModelSummary[]> = (
+  value
+): value is readonly PiModelSummary[] =>
+  Array.isArray(value) && value.every(isPiProviderSummary)
+
+export const isStartPiOAuthLoginResult: Guard<StartPiOAuthLoginResult> = (
+  value
+): value is StartPiOAuthLoginResult =>
+  isRecord(value) && hasOnlyKeys(value, ["loginId"]) && isJobId(value.loginId)
+
+const piLoginEventTypes = new Set([
+  "progress",
+  "auth",
+  "prompt",
+  "completed",
+  "cancelled",
+  "failed",
+])
+
+export const isPiLoginEvent: Guard<PiLoginEvent> = (
+  value
+): value is PiLoginEvent => {
+  if (
+    !isRecord(value) ||
+    !isJobId(value.loginId) ||
+    typeof value.type !== "string" ||
+    !piLoginEventTypes.has(value.type)
+  ) {
+    return false
+  }
+  switch (value.type) {
+    case "progress":
+      return (
+        hasOnlyKeys(value, ["loginId", "type", "message"]) &&
+        isString(value.message)
+      )
+    case "auth":
+      return (
+        hasOnlyKeys(value, ["loginId", "type", "url", "instructions"]) &&
+        isString(value.url) &&
+        (value.instructions === undefined || isString(value.instructions))
+      )
+    case "prompt":
+      return (
+        hasOnlyKeys(value, [
+          "loginId",
+          "type",
+          "promptId",
+          "message",
+          "placeholder",
+        ]) &&
+        isJobId(value.promptId) &&
+        isString(value.message) &&
+        (value.placeholder === undefined || isString(value.placeholder))
+      )
+    case "completed":
+    case "cancelled":
+      return hasOnlyKeys(value, ["loginId", "type"])
+    case "failed":
+      return (
+        hasOnlyKeys(value, ["loginId", "type", "error"]) &&
+        isAmendError(value.error)
+      )
+    default:
+      return false
+  }
+}
 
 export const isWikiProgressEvent: Guard<WikiProgressEvent> = (
   value

@@ -154,6 +154,71 @@ export interface WikiProgressEvent {
   message: string
 }
 
+export const piOAuthProviderIds = ["anthropic", "openai-codex"] as const
+export type PiOAuthProviderId = (typeof piOAuthProviderIds)[number]
+
+export interface PiConnectionStatus {
+  configured: boolean
+  provider?: string
+  model?: string
+}
+
+export interface PiProviderSummary {
+  id: string
+  name: string
+}
+
+export interface PiModelSummary {
+  id: string
+  name: string
+}
+
+export interface PiListModelsInput {
+  provider: string
+}
+
+export interface StartPiOAuthLoginInput {
+  provider: PiOAuthProviderId
+}
+
+export interface StartPiOAuthLoginResult {
+  loginId: string
+}
+
+export interface PiSaveApiKeyInput {
+  provider: string
+  apiKey: string
+}
+
+export interface PiSetDefaultModelInput {
+  provider: string
+  model: string
+}
+
+export interface PiRespondToPromptInput {
+  loginId: string
+  promptId: string
+  value: string
+}
+
+export interface PiCancelLoginInput {
+  loginId: string
+}
+
+export type PiLoginEvent =
+  | { loginId: string; type: "progress"; message: string }
+  | { loginId: string; type: "auth"; url: string; instructions?: string }
+  | {
+      loginId: string
+      type: "prompt"
+      promptId: string
+      message: string
+      placeholder?: string
+    }
+  | { loginId: string; type: "completed" }
+  | { loginId: string; type: "cancelled" }
+  | { loginId: string; type: "failed"; error: AmendError }
+
 export interface AmendApi {
   readonly runtime: "electron"
   readonly platform: string
@@ -163,6 +228,29 @@ export interface AmendApi {
       input: CreateWorkspaceInput
     ) => Promise<AmendResult<WorkspaceSummary>>
     current: () => Promise<AmendResult<WorkspaceSummary | null>>
+  }
+  readonly pi: {
+    status: () => Promise<AmendResult<PiConnectionStatus>>
+    listApiKeyProviders: () => Promise<
+      AmendResult<readonly PiProviderSummary[]>
+    >
+    listModels: (
+      input: PiListModelsInput
+    ) => Promise<AmendResult<readonly PiModelSummary[]>>
+    startOAuthLogin: (
+      input: StartPiOAuthLoginInput
+    ) => Promise<AmendResult<StartPiOAuthLoginResult>>
+    respondToPrompt: (
+      input: PiRespondToPromptInput
+    ) => Promise<AmendResult<null>>
+    cancelLogin: (input: PiCancelLoginInput) => Promise<AmendResult<null>>
+    saveApiKeyCredential: (
+      input: PiSaveApiKeyInput
+    ) => Promise<AmendResult<null>>
+    setDefaultModel: (
+      input: PiSetDefaultModelInput
+    ) => Promise<AmendResult<null>>
+    onLoginEvent: (listener: (event: PiLoginEvent) => void) => () => void
   }
   readonly wiki: {
     chooseDocument: () => Promise<AmendResult<SourceDocumentSelection | null>>
@@ -221,6 +309,59 @@ export const createWorkspaceInputSchema = Type.Object(
     name: workspaceNameSchema,
     domain: nonBlankText(2_000),
   },
+  { additionalProperties: false }
+)
+
+const idempotencyIdSchema = Type.String({
+  minLength: 8,
+  maxLength: 128,
+  pattern: "^[a-zA-Z0-9_-]+$",
+})
+const providerIdSchema = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: "^[a-z0-9][a-z0-9-]*$",
+})
+
+export const piListModelsInputSchema = Type.Object(
+  { provider: providerIdSchema },
+  { additionalProperties: false }
+)
+
+export const startPiOAuthLoginInputSchema = Type.Object(
+  {
+    provider: Type.Union(piOAuthProviderIds.map((id) => Type.Literal(id))),
+  },
+  { additionalProperties: false }
+)
+
+export const piSaveApiKeyInputSchema = Type.Object(
+  {
+    provider: providerIdSchema,
+    apiKey: nonBlankText(4_000),
+  },
+  { additionalProperties: false }
+)
+
+export const piSetDefaultModelInputSchema = Type.Object(
+  {
+    provider: providerIdSchema,
+    model: Type.String({ minLength: 1, maxLength: 200 }),
+  },
+  { additionalProperties: false }
+)
+
+export const piRespondToPromptInputSchema = Type.Object(
+  {
+    loginId: idempotencyIdSchema,
+    promptId: idempotencyIdSchema,
+    value: Type.String({ maxLength: 2_000 }),
+  },
+  { additionalProperties: false }
+)
+
+export const piCancelLoginInputSchema = Type.Object(
+  { loginId: idempotencyIdSchema },
   { additionalProperties: false }
 )
 
@@ -284,4 +425,40 @@ export function isCancelIngestInput(
 
 export function isWikiSearchInput(value: unknown): value is WikiSearchInput {
   return Value.Check(wikiSearchInputSchema, value)
+}
+
+export function isPiListModelsInput(
+  value: unknown
+): value is PiListModelsInput {
+  return Value.Check(piListModelsInputSchema, value)
+}
+
+export function isStartPiOAuthLoginInput(
+  value: unknown
+): value is StartPiOAuthLoginInput {
+  return Value.Check(startPiOAuthLoginInputSchema, value)
+}
+
+export function isPiSaveApiKeyInput(
+  value: unknown
+): value is PiSaveApiKeyInput {
+  return Value.Check(piSaveApiKeyInputSchema, value)
+}
+
+export function isPiSetDefaultModelInput(
+  value: unknown
+): value is PiSetDefaultModelInput {
+  return Value.Check(piSetDefaultModelInputSchema, value)
+}
+
+export function isPiRespondToPromptInput(
+  value: unknown
+): value is PiRespondToPromptInput {
+  return Value.Check(piRespondToPromptInputSchema, value)
+}
+
+export function isPiCancelLoginInput(
+  value: unknown
+): value is PiCancelLoginInput {
+  return Value.Check(piCancelLoginInputSchema, value)
 }
