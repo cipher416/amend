@@ -24,3 +24,17 @@ export function isAllowedNavigation(
     return false
   }
 }
+
+export function isAllowedIpcSender(input: {
+  senderId: number
+  expectedSenderId: number
+  senderUrl: string
+  isMainFrame: boolean
+  allowedOrigin: string
+}): boolean {
+  return (
+    input.senderId === input.expectedSenderId &&
+    input.isMainFrame &&
+    isAllowedNavigation(input.senderUrl, input.allowedOrigin)
+  )
+}

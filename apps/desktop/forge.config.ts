@@ -7,12 +7,16 @@ import { VitePlugin } from "@electron-forge/plugin-vite"
 import type { ForgeConfig } from "@electron-forge/shared-types"
 
 const rendererDirectory = path.resolve(__dirname, "../web/dist/client")
+const wikiSkillDirectory = path.resolve(
+  __dirname,
+  "../../packages/wiki-engine/skills/llm-wiki"
+)
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     executableName: "amend",
-    extraResource: [rendererDirectory],
+    extraResource: [rendererDirectory, wikiSkillDirectory],
   },
   makers: [
     {
@@ -49,7 +53,10 @@ const config: ForgeConfig = {
   ],
   hooks: {
     generateAssets: async () => {
-      await access(path.join(rendererDirectory, "_shell.html"))
+      await Promise.all([
+        access(path.join(rendererDirectory, "_shell.html")),
+        access(path.join(wikiSkillDirectory, "SKILL.md")),
+      ])
     },
   },
 }

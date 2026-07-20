@@ -4,13 +4,18 @@
   "version": "0.0.1",
   "description": "Local-first, self-maintaining wiki",
   "private": true,
-  "main": ".vite/build/main.js",
+  "main": ".vite/main/main.mjs",
+  "dependencies": {
+    "@workspace/contract": "workspace:*",
+    "@workspace/wiki-engine": "workspace:*",
+    "pdf-parse": "^2.4.5"
+  },
   "scripts": {
-    "dev": "wait-on http-get://127.0.0.1:3000 && electron-forge start",
-    "build": "vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
+    "dev": "wait-on http-get://127.0.0.1:3001 && electron-forge start",
+    "build": "node -e \"require('node:fs').rmSync('.vite', { recursive: true, force: true })\" && vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts",
+    "test": "tsx --test src/**/*.test.ts && node src/main/sqlite-smoke.mjs",
     "package": "electron-forge package",
     "make": "electron-forge make"
   },
