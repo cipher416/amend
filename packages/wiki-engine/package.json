@@ -25,7 +25,8 @@
     "vitest": "4.1.6"
   },
   "exports": {
-    "./wiki-engine": "./src/wiki-engine.ts",
-    "./pi-agent": "./src/pi-agent.ts"
+    "./ingest": "./src/ingest/index.ts",
+    "./agent/pi": "./src/agent/pi.ts",
+    "./index": "./src/index/index.ts"
   }
 }

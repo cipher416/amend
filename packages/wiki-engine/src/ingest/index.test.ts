@@ -5,8 +5,8 @@ import { promisify } from "node:util"
 import { execFile } from "node:child_process"
 import { afterEach, describe, expect, it } from "vitest"
 
-import { createWikiEngine } from "./wiki-engine.ts"
-import type { WikiAgent } from "./wiki-engine.ts"
+import { createWikiEngine } from "./index.ts"
+import type { WikiAgent } from "./index.ts"
 
 const execFileAsync = promisify(execFile)
 const temporaryDirectories: string[] = []
@@ -48,6 +48,9 @@ describe("wiki engine", () => {
     })
     expect(await readFile(join(workspacePath, "SCHEMA.md"), "utf8")).toContain(
       "Wikilinks reference wiki page slugs only"
+    )
+    expect(await readFile(join(workspacePath, "SCHEMA.md"), "utf8")).toContain(
+      "Tags are open-ended; there is no fixed taxonomy"
     )
 
     const first = await engine.ingest({
@@ -175,6 +178,45 @@ describe("wiki engine", () => {
     expect(await git(workspacePath, "status", "--porcelain")).toBe("")
   })
 
+  it("rejects changes to linked-worktree Git metadata", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "amend-wiki-engine-"))
+    temporaryDirectories.push(parent)
+    const workspacePath = join(parent, "wiki")
+    const engine = createWikiEngine({
+      agent: {
+        name: "fake/git-metadata-writer",
+        async run({ workspacePath: worktreePath }) {
+          await writeFile(
+            join(worktreePath, ".git"),
+            "gitdir: /tmp/agent-controlled\n"
+          )
+          return { summary: "Modified Git metadata" }
+        },
+      },
+      createRunId: () => "019f7910-0000-7000-8000-000000000001",
+      now: () => new Date("2026-07-19T12:00:00.000Z"),
+    })
+    const initialized = await engine.initialize({
+      workspacePath,
+      domain: "Distributed systems engineering",
+    })
+
+    await expect(
+      engine.ingest({
+        workspacePath,
+        sources: [
+          {
+            path: "raw/articles/write-ahead-logging.md",
+            content: "# Write-ahead logging\n",
+          },
+        ],
+      })
+    ).rejects.toThrow("modified protected Git metadata")
+    expect(await git(workspacePath, "rev-parse", "HEAD")).toBe(
+      initialized.commitHash
+    )
+  })
+
   it("reports all deterministic lint diagnostics to the agent", async () => {
     const parent = await mkdtemp(join(tmpdir(), "amend-wiki-engine-"))
     temporaryDirectories.push(parent)
@@ -186,12 +228,12 @@ describe("wiki engine", () => {
         await writeFile(
           join(input.workspacePath, "concepts/write-ahead-logging.md"),
           `---
-title: Write-ahead logging
-created: 2026-07-19
+title: ""
+created: 2026-02-31
 updated: 2026-07-19
-type: concept
+type: 42
 tags: [storage]
-sources: [raw/articles/write-ahead-logging.md]
+sources: [raw/articles/missing.md, invalid-source]
 ---
 
 # Write-ahead logging
@@ -226,8 +268,123 @@ See [[missing-page]].
       })
     ).rejects.toThrow("Wiki lint failed")
     expect(reportedCodes).toEqual(
-      expect.arrayContaining(["index.missing-page", "wikilink.broken"])
+      expect.arrayContaining([
+        "frontmatter.invalid-title",
+        "frontmatter.invalid-date",
+        "frontmatter.invalid-type",
+        "frontmatter.invalid-source",
+        "frontmatter.missing-source",
+        "index.missing-page",
+        "wikilink.broken",
+      ])
     )
+    expect(
+      reportedCodes.filter((code) => code === "frontmatter.invalid-type")
+    ).toHaveLength(1)
+  })
+
+  it("validates frontmatter arrays and recursive aliases", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "amend-wiki-engine-"))
+    temporaryDirectories.push(parent)
+    const workspacePath = join(parent, "wiki")
+    const diagnosticsByTags = new Map<string, string[]>()
+    let scalarSourceCodes: string[] = []
+    const agent: WikiAgent = {
+      name: "fake/tag-validator",
+      async run(input) {
+        const indexPath = join(input.workspacePath, "index.md")
+        await writeFile(
+          indexPath,
+          "# Wiki Index\n\n## Concepts\n\n- [[write-ahead-logging]]\n"
+        )
+        const logPath = join(input.workspacePath, "log.md")
+        await writeFile(
+          logPath,
+          `${await readFile(logPath, "utf8")}\n## [2026-07-19] ingest | Tag validation\n`
+        )
+
+        for (const tags of [
+          "[]",
+          "storage",
+          "[Storage]",
+          "[storage, storage]",
+          "&tags [*tags]",
+        ]) {
+          await writeFile(
+            join(input.workspacePath, "concepts/write-ahead-logging.md"),
+            `---
+title: Write-ahead logging
+created: 2026-07-19
+updated: 2026-07-19
+type: concept
+tags: ${tags}
+sources: [raw/articles/write-ahead-logging.md]
+---
+
+# Write-ahead logging
+
+The log supports recovery.
+`
+          )
+          diagnosticsByTags.set(
+            tags,
+            (await input.lint())
+              .map(({ code }) => code)
+              .filter((code) => code.startsWith("frontmatter."))
+          )
+        }
+        await writeFile(
+          join(input.workspacePath, "concepts/write-ahead-logging.md"),
+          `---
+title: Write-ahead logging
+created: 2026-07-19
+updated: 2026-07-19
+type: concept
+tags: [storage]
+sources: raw/articles/write-ahead-logging.md
+---
+
+# Write-ahead logging
+
+The log supports recovery.
+`
+        )
+        scalarSourceCodes = (await input.lint()).map(({ code }) => code)
+        return { summary: "Invalid tags" }
+      },
+    }
+    const engine = createWikiEngine({ agent })
+    await engine.initialize({
+      workspacePath,
+      domain: "Distributed systems engineering",
+    })
+
+    await expect(
+      engine.ingest({
+        workspacePath,
+        sources: [
+          {
+            path: "raw/articles/write-ahead-logging.md",
+            content: "# Write-ahead logging\n",
+          },
+        ],
+      })
+    ).rejects.toThrow("Sources must be a non-empty YAML sequence")
+    expect(diagnosticsByTags.get("[]")).toContain("frontmatter.invalid-tags")
+    expect(diagnosticsByTags.get("storage")).toContain(
+      "frontmatter.invalid-tags"
+    )
+    expect(diagnosticsByTags.get("[Storage]")).toContain(
+      "frontmatter.invalid-tag"
+    )
+    expect(diagnosticsByTags.get("[storage, storage]")).toContain(
+      "frontmatter.duplicate-tag"
+    )
+    expect(diagnosticsByTags.get("&tags [*tags]")).toContain(
+      "frontmatter.invalid"
+    )
+    expect(scalarSourceCodes).toContain("frontmatter.invalid-source")
+    expect(scalarSourceCodes).not.toContain("frontmatter.missing-source")
   })
 
   it("preserves primary-worktree edits made during an ingest", async () => {
@@ -318,7 +475,7 @@ title: Write-ahead logging
 created: 2026-07-19
 updated: 2026-07-19
 type: concept
-tags: [storage]
+tags: [distributed-systems, storage]
 sources:
   - raw/articles/write-ahead-logging.md
 confidence: medium

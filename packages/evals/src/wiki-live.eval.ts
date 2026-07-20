@@ -9,9 +9,9 @@ import {
   createPiWikiAgent,
   readPiAgentSettings,
   runPiReadOnly,
-} from "@workspace/wiki-engine/pi-agent"
-import type { PiThinkingLevel } from "@workspace/wiki-engine/pi-agent"
-import { createWikiEngine } from "@workspace/wiki-engine/wiki-engine"
+} from "@workspace/wiki-engine/agent/pi"
+import type { PiThinkingLevel } from "@workspace/wiki-engine/agent/pi"
+import { createWikiEngine } from "@workspace/wiki-engine/ingest"
 import TurndownService from "turndown"
 
 import { parseWikiJudgeResult } from "./wiki-evaluator.ts"

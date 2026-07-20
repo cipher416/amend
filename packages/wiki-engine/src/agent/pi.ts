@@ -1,6 +1,7 @@
-import { lstat, readFile, realpath } from "node:fs/promises"
+import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
-import { isAbsolute, join, relative, resolve, sep } from "node:path"
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import {
   AuthStorage,
@@ -25,12 +26,12 @@ import type {
 } from "@earendil-works/pi-coding-agent"
 import type { TSchema } from "typebox"
 
-import { WikiLintError } from "./wiki-engine.ts"
+import { WikiLintError } from "../ingest/index.ts"
 import type {
   WikiAgent,
   WikiAgentRunInput,
   WikiLintDiagnostic,
-} from "./wiki-engine.ts"
+} from "../ingest/index.ts"
 
 export type PiThinkingLevel =
   "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
@@ -81,6 +82,7 @@ export interface PiSessionRunInput {
   lint?: WikiAgentRunInput["lint"]
   maxRepairAttempts?: number
   onProgress?: (event: PiProgressEvent) => void
+  signal?: AbortSignal
 }
 
 export interface PiSessionRunResult {
@@ -133,6 +135,7 @@ export function createPiWikiAgent(options: PiAgentOptions): WikiAgent {
         lint: input.lint,
         maxRepairAttempts: options.maxRepairAttempts ?? 1,
         onProgress: options.onProgress,
+        signal: input.signal,
       })
       const summary =
         result.output
@@ -165,6 +168,7 @@ export async function runPiReadOnly(input: PiReadOnlyInput): Promise<{
 async function runPiSession(
   input: PiSessionRunInput
 ): Promise<PiSessionRunResult> {
+  input.signal?.throwIfAborted()
   const agentDir = getAgentDirectory()
   const authStorage = AuthStorage.create(join(agentDir, "auth.json"))
   const modelRegistry = ModelRegistry.create(
@@ -232,14 +236,22 @@ async function runPiSession(
     let output = ""
 
     for (let attempt = 0; ; attempt += 1) {
+      input.signal?.throwIfAborted()
       const remainingMs = deadline - Date.now()
       if (remainingMs <= 0) {
         void session.abort().catch(() => undefined)
         throw new Error(`Pi run timed out after ${input.timeoutMs}ms`)
       }
-      await promptWithTimeout(session, prompt, remainingMs, input.timeoutMs)
+      await promptWithTimeout(
+        session,
+        prompt,
+        remainingMs,
+        input.timeoutMs,
+        input.signal
+      )
       output = getSuccessfulAssistantOutput(session)
       const diagnostics = input.lint ? await input.lint() : []
+      input.signal?.throwIfAborted()
       if (diagnostics.length === 0) break
       if (attempt >= maxRepairAttempts) {
         throw new WikiLintError(diagnostics)
@@ -266,22 +278,53 @@ async function promptWithTimeout(
   session: Awaited<ReturnType<typeof createAgentSession>>["session"],
   prompt: string,
   timeoutMs: number,
-  reportedTimeoutMs = timeoutMs
+  reportedTimeoutMs = timeoutMs,
+  signal?: AbortSignal
 ): Promise<void> {
-  let timeout: NodeJS.Timeout | undefined
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error(`Pi run timed out after ${reportedTimeoutMs}ms`))
-      void session.abort().catch(() => undefined)
-    }, timeoutMs)
-    timeout.unref()
+  let onAbort: (() => void) | undefined
+  let interrupted = false
+  let rejectInterruption: ((error: Error) => void) | undefined
+  const promptPromise = session.prompt(prompt)
+  const interruptionPromise = new Promise<never>((_, reject) => {
+    rejectInterruption = reject
   })
+  const interrupt = (error: Error) => {
+    if (interrupted) return
+    interrupted = true
+    void (async () => {
+      await session.abort().catch(() => undefined)
+      await promptPromise.catch(() => undefined)
+      rejectInterruption?.(error)
+    })()
+  }
+  const timeout = setTimeout(() => {
+    interrupt(new Error(`Pi run timed out after ${reportedTimeoutMs}ms`))
+  }, timeoutMs)
+  timeout.unref()
+  if (signal) {
+    onAbort = () => interrupt(abortReason(signal))
+    if (signal.aborted) onAbort()
+    else signal.addEventListener("abort", onAbort, { once: true })
+  }
+  const guardedPrompt = promptPromise.then(
+    () => (interrupted ? interruptionPromise : undefined),
+    (error: unknown) => {
+      if (interrupted) return interruptionPromise
+      throw error
+    }
+  )
 
   try {
-    await Promise.race([session.prompt(prompt), timeoutPromise])
+    await Promise.race([guardedPrompt, interruptionPromise])
   } finally {
-    if (timeout) clearTimeout(timeout)
+    clearTimeout(timeout)
+    if (onAbort) signal?.removeEventListener("abort", onAbort)
   }
+}
+
+function abortReason(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason
+  return new DOMException("The operation was aborted", "AbortError")
 }
 
 function getSuccessfulAssistantOutput(
@@ -363,10 +406,21 @@ function confineTool<TParameters extends TSchema, TDetails, TState>(
   return defineTool({
     ...tool,
     async execute(toolCallId, parameters, signal, onUpdate, context) {
-      await assertWorkspacePath(workspacePath, getToolPath(parameters))
+      const pathInput = getToolPath(parameters)
+      const { relativePath, targetPath } = await assertWorkspacePath(
+        workspacePath,
+        pathInput
+      )
+      if (tool.name === "read") {
+        await lstat(targetPath).catch((error: unknown) => {
+          throw new Error(`Pi tool path does not exist: ${pathInput}`, {
+            cause: error,
+          })
+        })
+      }
       return await tool.execute(
         toolCallId,
-        parameters,
+        withToolPath(parameters, relativePath),
         signal,
         onUpdate,
         context
@@ -393,7 +447,7 @@ function getToolPath(parameters: unknown): string {
 async function assertWorkspacePath(
   workspacePath: string,
   pathInput: string
-): Promise<void> {
+): Promise<{ relativePath: string; targetPath: string }> {
   if (
     pathInput.includes("\0") ||
     pathInput.startsWith("~") ||
@@ -401,8 +455,9 @@ async function assertWorkspacePath(
   ) {
     throw new Error(`Pi tool path is outside the wiki workspace: ${pathInput}`)
   }
+  const normalizedInput = normalizePiToolPath(pathInput)
   const rootPath = await realpath(workspacePath)
-  const targetPath = resolve(rootPath, pathInput)
+  const targetPath = resolve(rootPath, normalizedInput)
   const relativePath = relative(rootPath, targetPath)
   if (
     relativePath === ".." ||
@@ -410,6 +465,9 @@ async function assertWorkspacePath(
     isAbsolute(relativePath)
   ) {
     throw new Error(`Pi tool path is outside the wiki workspace: ${pathInput}`)
+  }
+  if (relativePath === ".git" || relativePath.startsWith(`.git${sep}`)) {
+    throw new Error(`Pi tool path is protected Git metadata: ${pathInput}`)
   }
 
   let currentPath = rootPath
@@ -426,6 +484,30 @@ async function assertWorkspacePath(
       )
     }
   }
+  return { relativePath: relativePath || ".", targetPath }
+}
+
+function normalizePiToolPath(pathInput: string): string {
+  const normalized = pathInput.replace(
+    /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g,
+    " "
+  )
+  if (!/^file:\/\//.test(normalized)) return normalized
+  try {
+    return fileURLToPath(normalized)
+  } catch (error) {
+    throw new Error(
+      `Pi tool path is outside the wiki workspace: ${pathInput}`,
+      {
+        cause: error,
+      }
+    )
+  }
+}
+
+function withToolPath<T>(parameters: T, path: string): T {
+  if (typeof parameters !== "object" || parameters === null) return parameters
+  return { ...parameters, path }
 }
 
 function reportProgress(
@@ -448,10 +530,31 @@ function reportProgress(
   }
 }
 
-function getAgentDirectory(): string {
+export function getAgentDirectory(): string {
   return resolve(
     process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi/agent")
   )
+}
+
+/**
+ * Persist the default provider/model/thinking level to settings.json,
+ * preserving any other keys already present (e.g. theme, changelog state).
+ */
+export async function writePiAgentSettings(
+  settings: PiAgentSettings,
+  settingsPath = join(getAgentDirectory(), "settings.json")
+): Promise<void> {
+  const existing: Record<string, unknown> = await readFile(settingsPath, "utf8")
+    .then((raw) => JSON.parse(raw) as Record<string, unknown>)
+    .catch(() => ({}))
+  const next = {
+    ...existing,
+    defaultProvider: settings.provider,
+    defaultModel: settings.model,
+    defaultThinkingLevel: settings.thinking,
+  }
+  await mkdir(dirname(settingsPath), { recursive: true })
+  await writeFile(settingsPath, `${JSON.stringify(next, null, 2)}\n`, "utf8")
 }
 
 function isThinkingLevel(value: unknown): value is PiThinkingLevel {

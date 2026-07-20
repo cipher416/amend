@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto"
-import { execFile } from "node:child_process"
 import {
   mkdir,
   readFile,
@@ -11,7 +10,14 @@ import {
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, posix, resolve } from "node:path"
-import { parse as parseYaml } from "yaml"
+
+import {
+  isValidSourcePath,
+  parseMarkdownFrontmatter,
+  readWikiPageMetadata,
+  wikiPageDirectories,
+} from "../internal/format.ts"
+import { git, validateWikiWorkspace } from "../internal/git-workspace.ts"
 
 export interface WikiAgentRunInput {
   workspacePath: string
@@ -19,6 +25,7 @@ export interface WikiAgentRunInput {
   sourcePaths: readonly string[]
   prompt: string
   lint: () => Promise<readonly WikiLintDiagnostic[]>
+  signal?: AbortSignal
 }
 
 export interface WikiLintDiagnostic {
@@ -62,6 +69,7 @@ export interface WikiAgent {
 export interface WikiSourceInput {
   path: string
   content: string
+  title?: string
   sourceUrl?: string
 }
 
@@ -89,6 +97,8 @@ export interface WikiEngine {
     workspacePath: string
     sources: readonly WikiSourceInput[]
     instruction?: string
+    signal?: AbortSignal
+    onCommitStart?: () => void
   }) => Promise<WikiRunResult>
 }
 
@@ -103,10 +113,11 @@ interface PreparedSource {
   content: string
   hash: string
   storedContent: string
+  title?: string
   sourceUrl?: string
 }
 
-const pageDirectories = ["entities", "concepts", "comparisons", "queries"]
+const pageDirectories = wikiPageDirectories
 const managedRootFiles = new Set(["SCHEMA.md", "index.md", "log.md"])
 
 export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
@@ -120,45 +131,66 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
       if (!domain) throw new Error("Wiki domain is required")
 
       await mkdir(workspacePath)
-      await Promise.all(
-        [
-          ".amend/runs",
-          "raw/articles",
-          "raw/papers",
-          "raw/transcripts",
-          "raw/assets",
-          ...pageDirectories,
-        ].map((path) => mkdir(join(workspacePath, path), { recursive: true }))
-      )
-      await Promise.all([
-        writeFile(
-          join(workspacePath, ".amend/workspace.json"),
-          `${JSON.stringify({ version: 1, domain }, null, 2)}\n`
-        ),
-        writeFile(join(workspacePath, "SCHEMA.md"), createSchema(domain)),
-        writeFile(join(workspacePath, "index.md"), createIndex()),
-        writeFile(join(workspacePath, "log.md"), createLog(domain)),
-        writeFile(join(workspacePath, ".gitignore"), ".amend/run.lock\n"),
-      ])
-      await git(workspacePath, "init", "--initial-branch=main")
-      await git(workspacePath, "config", "user.name", "Amend")
-      await git(workspacePath, "config", "user.email", "amend@example.invalid")
-      await git(workspacePath, "config", "commit.gpgsign", "false")
-      await git(workspacePath, "add", "--all")
-      await git(workspacePath, "commit", "-m", "Initialize wiki")
+      try {
+        await Promise.all(
+          [
+            ".amend/runs",
+            "raw/articles",
+            "raw/papers",
+            "raw/transcripts",
+            "raw/assets",
+            ...pageDirectories,
+          ].map((path) => mkdir(join(workspacePath, path), { recursive: true }))
+        )
+        await Promise.all([
+          writeFile(
+            join(workspacePath, ".amend/workspace.json"),
+            `${JSON.stringify({ version: 1, domain }, null, 2)}\n`
+          ),
+          writeFile(join(workspacePath, "SCHEMA.md"), createSchema(domain)),
+          writeFile(join(workspacePath, "index.md"), createIndex()),
+          writeFile(join(workspacePath, "log.md"), createLog(domain)),
+          writeFile(join(workspacePath, ".gitignore"), ".amend/run.lock\n"),
+        ])
+        await git(workspacePath, "init", "--initial-branch=main")
+        await git(workspacePath, "config", "user.name", "Amend")
+        await git(
+          workspacePath,
+          "config",
+          "user.email",
+          "amend@example.invalid"
+        )
+        await git(workspacePath, "config", "commit.gpgsign", "false")
+        await git(
+          workspacePath,
+          "config",
+          "core.hooksPath",
+          ".amend/hooks-disabled"
+        )
+        await git(workspacePath, "add", "--all")
+        await git(workspacePath, "commit", "-m", "Initialize wiki")
 
-      return {
-        workspacePath: await realpath(workspacePath),
-        commitHash: await git(workspacePath, "rev-parse", "HEAD"),
+        return {
+          workspacePath: await realpath(workspacePath),
+          commitHash: await git(workspacePath, "rev-parse", "HEAD"),
+        }
+      } catch (error) {
+        await rm(workspacePath, { recursive: true, force: true }).catch(
+          () => undefined
+        )
+        throw error
       }
     },
 
     async ingest(input) {
-      const workspacePath = await validateWorkspace(input.workspacePath)
+      input.signal?.throwIfAborted()
+      const workspacePath = await validateWikiWorkspace(input.workspacePath)
+      input.signal?.throwIfAborted()
       const lockPath = join(workspacePath, ".git/amend-run.lock")
       const lock = await acquireLock(lockPath)
 
       try {
+        input.signal?.throwIfAborted()
         const status = await git(workspacePath, "status", "--porcelain")
         if (status) throw new Error("Wiki workspace must be clean")
 
@@ -178,6 +210,7 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
             worktreePath,
             baseCommit
           )
+          const gitControl = await readFile(join(worktreePath, ".git"), "utf8")
           await Promise.all(
             [
               ".amend/runs",
@@ -223,15 +256,23 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
               instruction: input.instruction,
             }),
             lint,
+            signal: input.signal,
           })
+          input.signal?.throwIfAborted()
           const summary = agentResult.summary.trim()
           if (!summary) throw new Error("Wiki agent summary is required")
+          if (
+            (await readFile(join(worktreePath, ".git"), "utf8")) !== gitControl
+          ) {
+            throw new Error("Wiki agent modified protected Git metadata")
+          }
           const currentHead = await git(worktreePath, "rev-parse", "HEAD")
           if (currentHead !== baseCommit) {
             throw new Error("Wiki agent must not create Git commits")
           }
 
           const diagnostics = await lint()
+          input.signal?.throwIfAborted()
           if (diagnostics.length > 0) throw new WikiLintError(diagnostics)
           const manifestPath = `.amend/runs/${runId}.json`
           await writeFile(
@@ -244,9 +285,10 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
                 createdAt,
                 baseCommit,
                 agent: options.agent.name,
-                sources: sources.map(({ path, hash, sourceUrl }) => ({
+                sources: sources.map(({ path, hash, title, sourceUrl }) => ({
                   path,
                   hash,
+                  ...(title ? { title } : {}),
                   ...(sourceUrl ? { sourceUrl } : {}),
                 })),
                 summary,
@@ -277,6 +319,8 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
             .split("\n")
             .filter(Boolean)
 
+          input.signal?.throwIfAborted()
+          input.onCommitStart?.()
           if (await git(workspacePath, "status", "--porcelain")) {
             throw new Error("Wiki workspace changed during ingest")
           }
@@ -333,27 +377,15 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
             "--force",
             worktreePath
           ).catch(() => undefined)
-          await rm(temporaryParent, { recursive: true, force: true })
+          await rm(temporaryParent, { recursive: true, force: true }).catch(
+            () => undefined
+          )
         }
       } finally {
-        await releaseLock(lockPath, lock)
+        await releaseLock(lockPath, lock).catch(() => undefined)
       }
     },
   }
-}
-
-async function validateWorkspace(workspacePathInput: string): Promise<string> {
-  const workspacePath = await realpath(resolve(workspacePathInput))
-  const record = JSON.parse(
-    await readFile(join(workspacePath, ".amend/workspace.json"), "utf8")
-  ) as { version?: unknown }
-  if (record.version !== 1) throw new Error("Unsupported wiki workspace")
-  if (
-    (await git(workspacePath, "symbolic-ref", "HEAD")) !== "refs/heads/main"
-  ) {
-    throw new Error("Wiki workspace must use the main branch")
-  }
-  return workspacePath
 }
 
 function prepareSources(
@@ -376,6 +408,10 @@ function prepareSources(
       throw new Error(`Source is too large: ${path}`)
     }
     const hash = createHash("sha256").update(content, "utf8").digest("hex")
+    const title = source.title?.trim()
+    if (source.title !== undefined && !title) {
+      throw new Error(`Source title is empty: ${path}`)
+    }
     const sourceUrl = source.sourceUrl
       ? validateSourceUrl(source.sourceUrl)
       : undefined
@@ -384,8 +420,9 @@ function prepareSources(
       path,
       content,
       hash,
+      ...(title ? { title } : {}),
       ...(sourceUrl ? { sourceUrl } : {}),
-      storedContent: `---\n${sourceUrl ? `source_url: ${sourceUrl}\n` : ""}ingested: ${createdAt.slice(0, 10)}\nsha256: ${hash}\n---\n\n${content}`,
+      storedContent: `---\n${title ? `title: ${JSON.stringify(title)}\n` : ""}${sourceUrl ? `source_url: ${sourceUrl}\n` : ""}ingested: ${createdAt.slice(0, 10)}\nsha256: ${hash}\n---\n\n${content}`,
     }
   })
 }
@@ -405,12 +442,6 @@ function validateSourcePath(pathInput: string): string {
     throw new Error(`Invalid source path: ${pathInput}`)
   }
   return path
-}
-
-function isValidSourcePath(path: string): boolean {
-  return /^raw\/(?:articles|papers|transcripts)\/[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.test(
-    path
-  )
 }
 
 async function lintAgentChanges(input: {
@@ -588,7 +619,7 @@ async function lintPageFrontmatter(
   const diagnostics: WikiLintDiagnostic[] = []
   let frontmatter: Map<string, unknown>
   try {
-    frontmatter = parseFrontmatter(content, pagePath)
+    frontmatter = parseMarkdownFrontmatter(content, pagePath).frontmatter
   } catch (error) {
     diagnostics.push({
       code: "frontmatter.invalid",
@@ -597,60 +628,14 @@ async function lintPageFrontmatter(
     })
     return diagnostics
   }
-  for (const field of [
-    "title",
-    "created",
-    "updated",
-    "type",
-    "tags",
-    "sources",
-  ]) {
-    if (!frontmatter.has(field)) {
-      diagnostics.push({
-        code: "frontmatter.missing-field",
-        path: pagePath,
-        message: `Missing required frontmatter field: ${field}`,
-      })
-    }
-  }
-  const typeValue = frontmatter.get("type")
-  const type = typeof typeValue === "string" ? typeValue : undefined
-  const typeDirectories = new Map([
-    ["entity", "entities"],
-    ["concept", "concepts"],
-    ["comparison", "comparisons"],
-    ["query", "queries"],
-  ])
-  if (!type || !typeDirectories.has(type)) {
-    diagnostics.push({
-      code: "frontmatter.invalid-type",
+  const metadata = readWikiPageMetadata(frontmatter, pagePath)
+  diagnostics.push(
+    ...metadata.diagnostics.map((diagnostic) => ({
+      ...diagnostic,
       path: pagePath,
-      message: `Invalid wiki page type: ${type ?? "missing"}`,
-    })
-  } else if (!pagePath.startsWith(`${typeDirectories.get(type)}/`)) {
-    diagnostics.push({
-      code: "frontmatter.type-directory-mismatch",
-      path: pagePath,
-      message: `Page type ${type} does not match its directory`,
-    })
-  }
-  const sourcePaths = parseStringList(frontmatter.get("sources"))
-  if (sourcePaths.length === 0) {
-    diagnostics.push({
-      code: "frontmatter.missing-source",
-      path: pagePath,
-      message: "The page must cite at least one raw source",
-    })
-  }
-  for (const sourcePath of sourcePaths) {
-    if (!isValidSourcePath(sourcePath)) {
-      diagnostics.push({
-        code: "frontmatter.invalid-source",
-        path: pagePath,
-        message: `Invalid raw source path: ${sourcePath}`,
-      })
-      continue
-    }
+    }))
+  )
+  for (const sourcePath of metadata.sourcePaths) {
     const exists = await readFile(
       join(worktreePath, ...sourcePath.split("/")),
       "utf8"
@@ -666,28 +651,6 @@ async function lintPageFrontmatter(
     }
   }
   return diagnostics
-}
-
-function parseFrontmatter(content: string, path: string): Map<string, unknown> {
-  if (!content.startsWith("---\n")) {
-    throw new Error(`Wiki page is missing YAML frontmatter: ${path}`)
-  }
-  const end = content.indexOf("\n---\n", 4)
-  if (end === -1)
-    throw new Error(`Wiki page frontmatter is not closed: ${path}`)
-  const value = parseYaml(content.slice(4, end)) as unknown
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`Wiki page frontmatter must be a YAML object: ${path}`)
-  }
-  return new Map(Object.entries(value))
-}
-
-function parseStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
 }
 
 async function validateManagedPaths(
@@ -779,6 +742,7 @@ Requirements:
 - Never modify anything under raw/.
 - Create or update useful wiki pages based on the sources.
 - Keep page frontmatter, wikilinks, index.md, and log.md consistent.
+- Give every wiki page at least one unique, lowercase kebab-case tag. Tags are open-ended.
 - Use [[wikilinks]] only for existing or newly created wiki page slugs. Keep raw source paths as plain text.
 - Append one ingest entry to log.md.
 - Do not run Git or create commits; Amend owns Git history.
@@ -808,13 +772,10 @@ ${domain}
 - tags
 - sources
 
-## Tag Taxonomy
-- architecture
-- concept
-- performance
-- reliability
-- research
-- storage
+## Tags
+- Tags are open-ended; there is no fixed taxonomy.
+- Every page has at least one tag.
+- Tags use lowercase kebab-case and are unique within a page.
 
 ## Update Policy
 Preserve conflicting positions, mark uncertainty, and never silently overwrite raw evidence.
@@ -952,25 +913,6 @@ function isProcessRunning(pid: number): boolean {
   } catch (error) {
     return !isNodeError(error) || error.code !== "ESRCH"
   }
-}
-
-async function git(cwd: string, ...arguments_: string[]): Promise<string> {
-  return await new Promise((resolvePromise, rejectPromise) => {
-    execFile(
-      "git",
-      ["-C", cwd, ...arguments_],
-      { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (error) {
-          rejectPromise(
-            new Error(stderr.trim() || error.message, { cause: error })
-          )
-          return
-        }
-        resolvePromise(stdout.trim())
-      }
-    )
-  })
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

@@ -1,9 +1,9 @@
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { createPiWikiAgent, readPiAgentSettings } from "./pi-agent.ts"
+import { createPiWikiAgent, readPiAgentSettings } from "./pi.ts"
 
 const sdk = vi.hoisted(() => ({
   createAgentSession: vi.fn(),
@@ -73,6 +73,7 @@ describe("Pi wiki agent", () => {
       lint,
       maxRepairAttempts: 1,
       onProgress: undefined,
+      signal: undefined,
     })
     expect(agent.name).toBe("openai-codex/gpt-test")
     expect(result).toEqual({
@@ -106,12 +107,18 @@ describe("Pi wiki agent", () => {
     ).rejects.toThrow("Model request failed")
   })
 
-  it("rejects on timeout without waiting for abort to settle", async () => {
+  it("waits for the active Pi prompt to settle after a timeout", async () => {
     vi.useFakeTimers()
-    const abort = vi.fn(() => new Promise<void>(() => undefined))
+    let rejectPrompt: ((error: Error) => void) | undefined
+    const abort = vi.fn(async () => {
+      rejectPrompt?.(new DOMException("Aborted", "AbortError"))
+    })
     sdk.createAgentSession.mockResolvedValue({
       session: createSession({
-        prompt: () => new Promise<void>(() => undefined),
+        prompt: () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectPrompt = reject
+          }),
         abort,
       }),
     })
@@ -135,6 +142,48 @@ describe("Pi wiki agent", () => {
     await vi.advanceTimersByTimeAsync(100)
 
     await rejection
+    expect(abort).toHaveBeenCalledOnce()
+  })
+
+  it("aborts the active Pi prompt when the caller cancels", async () => {
+    let rejectPrompt: ((error: Error) => void) | undefined
+    const abort = vi.fn(async () => {
+      rejectPrompt?.(new DOMException("Aborted", "AbortError"))
+    })
+    let markPromptStarted: (() => void) | undefined
+    const promptStarted = new Promise<void>((resolve) => {
+      markPromptStarted = resolve
+    })
+    sdk.createAgentSession.mockResolvedValue({
+      session: createSession({
+        prompt: () => {
+          markPromptStarted?.()
+          return new Promise<void>((_resolve, reject) => {
+            rejectPrompt = reject
+          })
+        },
+        abort,
+      }),
+    })
+    const controller = new AbortController()
+    const agent = createPiWikiAgent({
+      provider: "openai-codex",
+      model: "gpt-test",
+      skillPath: "/skills/llm-wiki/SKILL.md",
+    })
+
+    const run = agent.run({
+      workspacePath: "/wiki",
+      runId: "019f7910-0000-7000-8000-000000000001",
+      sourcePaths: ["raw/papers/paper.md"],
+      prompt: "Maintain the wiki.",
+      lint: vi.fn(async () => []),
+      signal: controller.signal,
+    })
+    await promptStarted
+    controller.abort()
+
+    await expect(run).rejects.toMatchObject({ name: "AbortError" })
     expect(abort).toHaveBeenCalledOnce()
   })
 
@@ -210,7 +259,10 @@ describe("Pi wiki agent", () => {
   })
 
   it("confines SDK file tools to the wiki workspace", async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), "amend-pi-workspace-"))
+    const parent = await mkdtemp(join(tmpdir(), "amend-pi-workspace-"))
+    const workspacePath = join(parent, "wiki\u00a0space")
+    await mkdir(workspacePath)
+    await writeFile(join(workspacePath, "inside.md"), "safe")
     if (process.platform !== "win32") {
       await symlink("/etc", join(workspacePath, "escape"))
     }
@@ -244,14 +296,23 @@ describe("Pi wiki agent", () => {
     expect(sessionOptions.noTools).toBe("builtin")
     expect(readTool).toBeDefined()
     await expect(
+      readTool?.execute("call-safe", { path: "inside.md" })
+    ).resolves.toBeDefined()
+    await expect(
       readTool?.execute("call-1", { path: "/etc/passwd" })
     ).rejects.toThrow("outside the wiki workspace")
+    await expect(
+      readTool?.execute("call-file-url", { path: "file:///etc/passwd" })
+    ).rejects.toThrow("outside the wiki workspace")
+    await expect(
+      readTool?.execute("call-git", { path: ".git" })
+    ).rejects.toThrow("protected Git metadata")
     if (process.platform !== "win32") {
       await expect(
         readTool?.execute("call-2", { path: "escape/passwd" })
       ).rejects.toThrow("must not traverse symbolic links")
     }
-    await rm(workspacePath, { recursive: true, force: true })
+    await rm(parent, { recursive: true, force: true })
   })
 
   it("defaults an omitted Pi thinking level", async () => {
