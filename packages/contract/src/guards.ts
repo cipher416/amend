@@ -10,11 +10,15 @@ import type {
   SourceDocumentSelection,
   StartIngestResult,
   StartPiOAuthLoginResult,
+  WikiFileContent,
+  WikiFileTreeItem,
+  WikiIngestChangedEvent,
   WikiIngestJob,
   WikiIndexRefreshSummary,
   WikiProgressEvent,
   WikiSearchResult,
   WikiTagFacet,
+  WorkspaceListItem,
   WorkspaceParentSelection,
   WorkspaceSummary,
 } from "./index.ts"
@@ -35,6 +39,7 @@ const errorCodes = new Set<AmendErrorCode>([
   "pi-failed",
   "unauthorized",
   "workspace-creation-failed",
+  "workspace-open-failed",
 ])
 const progressPhases = new Set<WikiProgressEvent["phase"]>([
   "preparing",
@@ -73,17 +78,30 @@ export const isWorkspaceSummary: Guard<WorkspaceSummary> = (
   value
 ): value is WorkspaceSummary =>
   isRecord(value) &&
-  hasOnlyKeys(value, ["id", "name", "domain", "displayPath", "commitHash"]) &&
+  hasOnlyKeys(value, [
+    "id",
+    "name",
+    "domain",
+    "displayPath",
+    "commitHash",
+    "setupStatus",
+  ]) &&
   isString(value.id) &&
   isString(value.name) &&
   isString(value.domain) &&
   isString(value.displayPath) &&
-  isString(value.commitHash)
+  isString(value.commitHash) &&
+  (value.setupStatus === "initialized" || value.setupStatus === "ready")
 
 export const isWorkspaceSummaryOrNull: Guard<WorkspaceSummary | null> = (
   value
 ): value is WorkspaceSummary | null =>
   value === null || isWorkspaceSummary(value)
+
+export const isWorkspaceListItems: Guard<readonly WorkspaceListItem[]> = (
+  value
+): value is readonly WorkspaceListItem[] =>
+  Array.isArray(value) && value.every(isWorkspaceListItem)
 
 export const isSourceDocumentSelection: Guard<SourceDocumentSelection> = (
   value
@@ -208,6 +226,14 @@ export const isWikiIngestJob: Guard<WikiIngestJob> = (
   return value.result === undefined && value.error === undefined
 }
 
+export const isWikiIngestChangedEvent: Guard<WikiIngestChangedEvent> = (
+  value
+): value is WikiIngestChangedEvent =>
+  isRecord(value) &&
+  hasOnlyKeys(value, ["workspaceId", "job"]) &&
+  isString(value.workspaceId) &&
+  isWikiIngestJob(value.job)
+
 export const isWikiSearchResults: Guard<readonly WikiSearchResult[]> = (
   value
 ): value is readonly WikiSearchResult[] =>
@@ -224,6 +250,25 @@ export const isWikiTagFacets: Guard<readonly WikiTagFacet[]> = (
       isString(facet.tag) &&
       isNumber(facet.count)
   )
+
+export const isWikiFileTreeItems: Guard<readonly WikiFileTreeItem[]> = (
+  value
+): value is readonly WikiFileTreeItem[] =>
+  Array.isArray(value) && value.every(isWikiFileTreeItem)
+
+export const isWikiFileContent: Guard<WikiFileContent> = (
+  value
+): value is WikiFileContent =>
+  isRecord(value) &&
+  hasOnlyKeys(value, ["path", "name", "mediaType", "size", "content"]) &&
+  isString(value.path) &&
+  isString(value.name) &&
+  ["markdown", "text", "binary"].includes(String(value.mediaType)) &&
+  isNumber(value.size) &&
+  (value.content === undefined || isString(value.content)) &&
+  (value.mediaType === "binary"
+    ? value.content === undefined
+    : isString(value.content))
 
 export const isPiConnectionStatus: Guard<PiConnectionStatus> = (
   value
@@ -381,6 +426,35 @@ function isWikiSearchResult(value: unknown): value is WikiSearchResult {
         isNumber(highlight.end)
     ) &&
     isNumber(value.score)
+  )
+}
+
+function isWikiFileTreeItem(value: unknown): value is WikiFileTreeItem {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ["path", "name", "kind", "children"]) ||
+    !isString(value.path) ||
+    !isString(value.name) ||
+    (value.kind !== "directory" && value.kind !== "file")
+  ) {
+    return false
+  }
+  if (value.kind === "file") return value.children === undefined
+  return (
+    value.children === undefined ||
+    (Array.isArray(value.children) && value.children.every(isWikiFileTreeItem))
+  )
+}
+
+function isWorkspaceListItem(value: unknown): value is WorkspaceListItem {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["id", "name", "displayPath", "active", "running"]) &&
+    isString(value.id) &&
+    isString(value.name) &&
+    isString(value.displayPath) &&
+    typeof value.active === "boolean" &&
+    typeof value.running === "boolean"
   )
 }
 

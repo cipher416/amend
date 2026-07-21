@@ -10,17 +10,21 @@ import {
   isSourceDocumentSelectionOrNull,
   isStartIngestResult,
   isStartPiOAuthLoginResult,
+  isWikiFileContent,
+  isWikiFileTreeItems,
   isWikiIndexRefreshSummary,
-  isWikiIngestJob,
+  isWikiIngestChangedEvent,
   isWikiIngestJobOrNull,
   isWikiSearchResults,
   isWikiTagFacets,
+  isWorkspaceListItems,
   isWorkspaceParentSelectionOrNull,
   isWorkspaceSummary,
   isWorkspaceSummaryOrNull,
 } from "@workspace/contract/guards"
 import type { Guard } from "@workspace/contract/guards"
 import type {
+  ActivateWorkspaceInput,
   AmendApi,
   AmendResult,
   CancelIngestInput,
@@ -32,48 +36,52 @@ import type {
   PiRespondToPromptInput,
   PiSaveApiKeyInput,
   PiSetDefaultModelInput,
+  ReadWikiFileInput,
   StartPiOAuthLoginInput,
-  WikiIngestJob,
+  WikiIngestChangedEvent,
   WikiSearchInput,
   WorkspaceParentSelection,
 } from "@workspace/contract"
 import { contextBridge, ipcRenderer, webUtils } from "electron"
 
-const workspace = Object.freeze({
-  chooseParent: () =>
+const workspaces = Object.freeze({
+  chooseLocation: () =>
     invoke<WorkspaceParentSelection | null>(
-      amendChannels.chooseWorkspaceParent,
+      amendChannels.chooseWorkspaceLocation,
       isWorkspaceParentSelectionOrNull
     ),
   create: (input: CreateWorkspaceInput) =>
     invoke(amendChannels.createWorkspace, isWorkspaceSummary, input),
+  open: () => invoke(amendChannels.openWorkspace, isWorkspaceSummaryOrNull),
   current: () =>
     invoke(amendChannels.getCurrentWorkspace, isWorkspaceSummaryOrNull),
+  list: () => invoke(amendChannels.listWorkspaces, isWorkspaceListItems),
+  activate: (input: ActivateWorkspaceInput) =>
+    invoke(amendChannels.activateWorkspace, isWorkspaceSummary, input),
 })
 
-const pi = Object.freeze({
-  status: () => invoke(amendChannels.piStatus, isPiConnectionStatus),
-  listApiKeyProviders: () =>
-    invoke(amendChannels.listPiApiKeyProviders, isPiProviderSummaries),
+const providers = Object.freeze({
+  status: () => invoke(amendChannels.getProviderStatus, isPiConnectionStatus),
+  list: () => invoke(amendChannels.listProviders, isPiProviderSummaries),
   listModels: (input: PiListModelsInput) =>
-    invoke(amendChannels.listPiModels, isPiModelSummaries, input),
-  startOAuthLogin: (input: StartPiOAuthLoginInput) =>
-    invoke(amendChannels.startPiOAuthLogin, isStartPiOAuthLoginResult, input),
-  respondToPrompt: (input: PiRespondToPromptInput) =>
-    invoke(amendChannels.respondToPiPrompt, isNull, input),
-  cancelLogin: (input: PiCancelLoginInput) =>
-    invoke(amendChannels.cancelPiLogin, isNull, input),
-  saveApiKeyCredential: (input: PiSaveApiKeyInput) =>
-    invoke(amendChannels.savePiApiKeyCredential, isNull, input),
+    invoke(amendChannels.listProviderModels, isPiModelSummaries, input),
+  startOAuth: (input: StartPiOAuthLoginInput) =>
+    invoke(amendChannels.startProviderOAuth, isStartPiOAuthLoginResult, input),
+  respondToOAuthPrompt: (input: PiRespondToPromptInput) =>
+    invoke(amendChannels.respondToProviderOAuthPrompt, isNull, input),
+  cancelOAuth: (input: PiCancelLoginInput) =>
+    invoke(amendChannels.cancelProviderOAuth, isNull, input),
+  connectWithApiKey: (input: PiSaveApiKeyInput) =>
+    invoke(amendChannels.connectProviderWithApiKey, isNull, input),
   setDefaultModel: (input: PiSetDefaultModelInput) =>
-    invoke(amendChannels.setPiDefaultModel, isNull, input),
-  onLoginEvent(listener: (event: PiLoginEvent) => void) {
+    invoke(amendChannels.setDefaultProviderModel, isNull, input),
+  onOAuthEvent(listener: (event: PiLoginEvent) => void) {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
       if (isPiLoginEvent(payload)) listener(payload)
     }
-    ipcRenderer.on(amendChannels.piLoginEvent, wrapped)
+    ipcRenderer.on(amendChannels.providerOAuthEvent, wrapped)
     return () => {
-      ipcRenderer.removeListener(amendChannels.piLoginEvent, wrapped)
+      ipcRenderer.removeListener(amendChannels.providerOAuthEvent, wrapped)
     }
   },
 })
@@ -117,12 +125,15 @@ const wiki = Object.freeze({
     invoke(amendChannels.cancelIngest, isNull, input),
   refreshIndex: () =>
     invoke(amendChannels.refreshWikiIndex, isWikiIndexRefreshSummary),
+  listFiles: () => invoke(amendChannels.listWikiFiles, isWikiFileTreeItems),
+  readFile: (input: ReadWikiFileInput) =>
+    invoke(amendChannels.readWikiFile, isWikiFileContent, input),
   search: (input: WikiSearchInput) =>
     invoke(amendChannels.searchWiki, isWikiSearchResults, input),
   listTags: () => invoke(amendChannels.listWikiTags, isWikiTagFacets),
-  onIngestChanged(listener: (job: WikiIngestJob) => void) {
-    const wrapped = (_event: Electron.IpcRendererEvent, job: unknown) => {
-      if (isWikiIngestJob(job)) listener(job)
+  onIngestChanged(listener: (event: WikiIngestChangedEvent) => void) {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      if (isWikiIngestChangedEvent(payload)) listener(payload)
     }
     ipcRenderer.on(amendChannels.ingestChanged, wrapped)
     return () => {
@@ -134,8 +145,8 @@ const wiki = Object.freeze({
 const amendApi = Object.freeze({
   runtime: "electron" as const,
   platform: process.platform,
-  workspace,
-  pi,
+  workspaces,
+  providers,
   wiki,
 }) satisfies AmendApi
 

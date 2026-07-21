@@ -17,6 +17,7 @@ export type AmendErrorCode =
   | "pi-failed"
   | "unauthorized"
   | "workspace-creation-failed"
+  | "workspace-open-failed"
 
 export interface AmendError {
   code: AmendErrorCode
@@ -37,12 +38,25 @@ export interface CreateWorkspaceInput {
   domain: string
 }
 
+export interface WorkspaceListItem {
+  id: string
+  name: string
+  displayPath: string
+  active: boolean
+  running: boolean
+}
+
+export interface ActivateWorkspaceInput {
+  workspaceId: string
+}
+
 export interface WorkspaceSummary {
   id: string
   name: string
   domain: string
   displayPath: string
   commitHash: string
+  setupStatus: "initialized" | "ready"
 }
 
 export interface SourceDocumentSelection {
@@ -106,6 +120,11 @@ export interface WikiIngestJob {
   error?: AmendError
 }
 
+export interface WikiIngestChangedEvent {
+  workspaceId: string
+  job: WikiIngestJob
+}
+
 export type WikiSearchScope = "all" | "pages" | "sources"
 export type WikiPageType = "entity" | "concept" | "comparison" | "query"
 
@@ -138,6 +157,25 @@ export interface WikiSearchResult {
 export interface WikiTagFacet {
   tag: string
   count: number
+}
+
+export interface WikiFileTreeItem {
+  path: string
+  name: string
+  kind: "directory" | "file"
+  children?: readonly WikiFileTreeItem[]
+}
+
+export interface ReadWikiFileInput {
+  path: string
+}
+
+export interface WikiFileContent {
+  path: string
+  name: string
+  mediaType: "markdown" | "text" | "binary"
+  size: number
+  content?: string
 }
 
 export type WikiProgressPhase =
@@ -222,35 +260,36 @@ export type PiLoginEvent =
 export interface AmendApi {
   readonly runtime: "electron"
   readonly platform: string
-  readonly workspace: {
-    chooseParent: () => Promise<AmendResult<WorkspaceParentSelection | null>>
+  readonly workspaces: {
+    chooseLocation: () => Promise<AmendResult<WorkspaceParentSelection | null>>
     create: (
       input: CreateWorkspaceInput
     ) => Promise<AmendResult<WorkspaceSummary>>
+    open: () => Promise<AmendResult<WorkspaceSummary | null>>
     current: () => Promise<AmendResult<WorkspaceSummary | null>>
+    list: () => Promise<AmendResult<readonly WorkspaceListItem[]>>
+    activate: (
+      input: ActivateWorkspaceInput
+    ) => Promise<AmendResult<WorkspaceSummary>>
   }
-  readonly pi: {
+  readonly providers: {
     status: () => Promise<AmendResult<PiConnectionStatus>>
-    listApiKeyProviders: () => Promise<
-      AmendResult<readonly PiProviderSummary[]>
-    >
+    list: () => Promise<AmendResult<readonly PiProviderSummary[]>>
     listModels: (
       input: PiListModelsInput
     ) => Promise<AmendResult<readonly PiModelSummary[]>>
-    startOAuthLogin: (
+    startOAuth: (
       input: StartPiOAuthLoginInput
     ) => Promise<AmendResult<StartPiOAuthLoginResult>>
-    respondToPrompt: (
+    respondToOAuthPrompt: (
       input: PiRespondToPromptInput
     ) => Promise<AmendResult<null>>
-    cancelLogin: (input: PiCancelLoginInput) => Promise<AmendResult<null>>
-    saveApiKeyCredential: (
-      input: PiSaveApiKeyInput
-    ) => Promise<AmendResult<null>>
+    cancelOAuth: (input: PiCancelLoginInput) => Promise<AmendResult<null>>
+    connectWithApiKey: (input: PiSaveApiKeyInput) => Promise<AmendResult<null>>
     setDefaultModel: (
       input: PiSetDefaultModelInput
     ) => Promise<AmendResult<null>>
-    onLoginEvent: (listener: (event: PiLoginEvent) => void) => () => void
+    onOAuthEvent: (listener: (event: PiLoginEvent) => void) => () => void
   }
   readonly wiki: {
     chooseDocument: () => Promise<AmendResult<SourceDocumentSelection | null>>
@@ -263,11 +302,17 @@ export interface AmendApi {
     currentIngest: () => Promise<AmendResult<WikiIngestJob | null>>
     cancelIngest: (input: CancelIngestInput) => Promise<AmendResult<null>>
     refreshIndex: () => Promise<AmendResult<WikiIndexRefreshSummary>>
+    listFiles: () => Promise<AmendResult<readonly WikiFileTreeItem[]>>
+    readFile: (
+      input: ReadWikiFileInput
+    ) => Promise<AmendResult<WikiFileContent>>
     search: (
       input: WikiSearchInput
     ) => Promise<AmendResult<readonly WikiSearchResult[]>>
     listTags: () => Promise<AmendResult<readonly WikiTagFacet[]>>
-    onIngestChanged: (listener: (job: WikiIngestJob) => void) => () => void
+    onIngestChanged: (
+      listener: (event: WikiIngestChangedEvent) => void
+    ) => () => void
   }
 }
 
@@ -302,12 +347,27 @@ const tagSchema = Type.String({
   maxLength: 80,
   pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
 })
+const wikiFilePathSchema = Type.String({
+  minLength: 1,
+  maxLength: 1_000,
+})
 
 export const createWorkspaceInputSchema = Type.Object(
   {
     selectionToken: selectionTokenSchema,
     name: workspaceNameSchema,
     domain: nonBlankText(2_000),
+  },
+  { additionalProperties: false }
+)
+
+export const activateWorkspaceInputSchema = Type.Object(
+  {
+    workspaceId: Type.String({
+      minLength: 1,
+      maxLength: 128,
+      pattern: "^[a-zA-Z0-9_-]+$",
+    }),
   },
   { additionalProperties: false }
 )
@@ -405,10 +465,21 @@ export const wikiSearchInputSchema = Type.Object(
   { additionalProperties: false }
 )
 
+export const readWikiFileInputSchema = Type.Object(
+  { path: wikiFilePathSchema },
+  { additionalProperties: false }
+)
+
 export function isCreateWorkspaceInput(
   value: unknown
 ): value is CreateWorkspaceInput {
   return Value.Check(createWorkspaceInputSchema, value)
+}
+
+export function isActivateWorkspaceInput(
+  value: unknown
+): value is ActivateWorkspaceInput {
+  return Value.Check(activateWorkspaceInputSchema, value)
 }
 
 export function isIngestDocumentInput(
@@ -425,6 +496,12 @@ export function isCancelIngestInput(
 
 export function isWikiSearchInput(value: unknown): value is WikiSearchInput {
   return Value.Check(wikiSearchInputSchema, value)
+}
+
+export function isReadWikiFileInput(
+  value: unknown
+): value is ReadWikiFileInput {
+  return Value.Check(readWikiFileInputSchema, value)
 }
 
 export function isPiListModelsInput(

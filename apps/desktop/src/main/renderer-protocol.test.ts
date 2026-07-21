@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import path from "node:path"
-import { describe, it } from "node:test"
+import { describe, it } from "vitest"
 
 import { resolveRendererPath } from "./renderer-path.ts"
 

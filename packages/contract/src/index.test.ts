@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest"
 
+import { amendChannels } from "./channels.ts"
 import {
-  isCreateWorkspaceInput,
+  isActivateWorkspaceInput,
   isCancelIngestInput,
+  isCreateWorkspaceInput,
   isIngestDocumentInput,
   isPiCancelLoginInput,
   isPiListModelsInput,
   isPiRespondToPromptInput,
   isPiSaveApiKeyInput,
   isPiSetDefaultModelInput,
+  isReadWikiFileInput,
   isStartPiOAuthLoginInput,
   isWikiSearchInput,
 } from "./index.ts"
@@ -20,12 +23,39 @@ import {
   isPiProviderSummaries,
   isSourceDocumentSelectionOrNull,
   isStartPiOAuthLoginResult,
+  isWikiFileContent,
+  isWikiFileTreeItems,
+  isWikiIngestChangedEvent,
   isWikiIngestJob,
   isWikiProgressEvent,
+  isWorkspaceListItems,
   isWorkspaceSummary,
+  isWorkspaceSummaryOrNull,
 } from "./guards.ts"
 
 describe("desktop contract validation", () => {
+  it("uses plural workspace and provider channel namespaces", () => {
+    expect(amendChannels).toMatchObject({
+      chooseWorkspaceLocation: "amend:workspaces:choose-location",
+      createWorkspace: "amend:workspaces:create",
+      openWorkspace: "amend:workspaces:open",
+      getCurrentWorkspace: "amend:workspaces:current",
+      listWorkspaces: "amend:workspaces:list",
+      activateWorkspace: "amend:workspaces:activate",
+      getProviderStatus: "amend:providers:status",
+      listProviders: "amend:providers:list",
+      listProviderModels: "amend:providers:list-models",
+      startProviderOAuth: "amend:providers:start-oauth",
+      respondToProviderOAuthPrompt: "amend:providers:respond-to-oauth-prompt",
+      cancelProviderOAuth: "amend:providers:cancel-oauth",
+      connectProviderWithApiKey: "amend:providers:connect-with-api-key",
+      setDefaultProviderModel: "amend:providers:set-default-model",
+      providerOAuthEvent: "amend:providers:oauth-event",
+      listWikiFiles: "amend:wiki:list-files",
+      readWikiFile: "amend:wiki:read-file",
+    })
+  })
+
   it("accepts valid workflow requests", () => {
     expect(
       isCreateWorkspaceInput({
@@ -42,6 +72,10 @@ describe("desktop contract validation", () => {
     ).toBe(true)
     expect(isWikiSearchInput({ query: "attention", scope: "pages" })).toBe(true)
     expect(isCancelIngestInput({ jobId: "ingest_12345678" })).toBe(true)
+    expect(
+      isActivateWorkspaceInput({ workspaceId: "workspace_12345678" })
+    ).toBe(true)
+    expect(isReadWikiFileInput({ path: "concepts/cache.md" })).toBe(true)
   })
 
   it("rejects paths, unknown fields, blank text, and unsafe filters", () => {
@@ -61,6 +95,19 @@ describe("desktop contract validation", () => {
     expect(isWikiSearchInput({ query: "wiki", extra: true })).toBe(false)
     expect(isWikiSearchInput({ query: "wiki", tags: ["Not Safe"] })).toBe(false)
     expect(isCancelIngestInput({ jobId: "../other-job" })).toBe(false)
+    expect(
+      isActivateWorkspaceInput({ workspaceId: "../other-workspace" })
+    ).toBe(false)
+    expect(
+      isActivateWorkspaceInput({
+        workspaceId: "workspace_12345678",
+        displayPath: "/must/not/cross/ipc",
+      })
+    ).toBe(false)
+    expect(isReadWikiFileInput({ path: "" })).toBe(false)
+    expect(isReadWikiFileInput({ path: "concepts/cache.md", extra: true })).toBe(
+      false
+    )
   })
 
   it("validates main-process responses before exposing them", () => {
@@ -70,15 +117,66 @@ describe("desktop contract validation", () => {
       domain: "Systems research",
       displayPath: "/research/wiki",
       commitHash: "abc123",
+      setupStatus: "ready",
     }
     expect(
       isAmendResult({ ok: true, value: workspace }, isWorkspaceSummary)
+    ).toBe(true)
+    expect(
+      isWorkspaceSummary({ ...workspace, setupStatus: "initialized" })
+    ).toBe(true)
+    expect(
+      isAmendResult({ ok: true, value: null }, isWorkspaceSummaryOrNull)
+    ).toBe(true)
+    expect(
+      isAmendResult(
+        {
+          ok: false,
+          error: {
+            code: "workspace-open-failed",
+            message: "The workspace could not be opened.",
+          },
+        },
+        isWorkspaceSummaryOrNull
+      )
     ).toBe(true)
     expect(
       isAmendResult(
         { ok: true, value: { ...workspace, secret: "must not cross preload" } },
         isWorkspaceSummary
       )
+    ).toBe(false)
+    expect(
+      isWorkspaceSummary({
+        id: "wiki-id",
+        name: "Research",
+        domain: "Systems research",
+        displayPath: "/research/wiki",
+        commitHash: "abc123",
+      })
+    ).toBe(false)
+    expect(isWorkspaceSummary({ ...workspace, setupStatus: "complete" })).toBe(
+      false
+    )
+    const workspaceListItem = {
+      id: "workspace_12345678",
+      name: "Research",
+      displayPath: "/research/wiki",
+      active: true,
+      running: false,
+    }
+    expect(isWorkspaceListItems([workspaceListItem])).toBe(true)
+    expect(
+      isAmendResult(
+        { ok: true, value: [workspaceListItem] },
+        isWorkspaceListItems
+      )
+    ).toBe(true)
+    expect(
+      isWorkspaceListItems([{ ...workspaceListItem, running: "no" }])
+    ).toBe(false)
+    expect(
+      isWorkspaceListItems([{ ...workspaceListItem, domain: "must not cross" }])
     ).toBe(false)
     expect(
       isSourceDocumentSelectionOrNull({
@@ -119,6 +217,82 @@ describe("desktop contract validation", () => {
         cancellable: false,
       })
     ).toBe(false)
+    expect(
+      isWikiFileTreeItems([
+        {
+          path: "concepts",
+          name: "concepts",
+          kind: "directory",
+          children: [
+            { path: "concepts/cache.md", name: "cache.md", kind: "file" },
+          ],
+        },
+      ])
+    ).toBe(true)
+    expect(
+      isWikiFileTreeItems([
+        {
+          path: "concepts/cache.md",
+          name: "cache.md",
+          kind: "file",
+          children: [],
+        },
+      ])
+    ).toBe(false)
+    expect(
+      isWikiFileContent({
+        path: "concepts/cache.md",
+        name: "cache.md",
+        mediaType: "markdown",
+        size: 12,
+        content: "# Cache",
+      })
+    ).toBe(true)
+    expect(
+      isWikiFileContent({
+        path: "sources/paper.pdf",
+        name: "paper.pdf",
+        mediaType: "binary",
+        size: 12,
+        content: "must not cross",
+      })
+    ).toBe(false)
+  })
+
+  it("validates workspace-scoped ingest events", () => {
+    const runningJob = {
+      id: "ingest_12345678",
+      title: "Attention Is All You Need",
+      status: "running" as const,
+      phase: "writing" as const,
+      message: "Writing wiki pages",
+      startedAt: "2026-07-20T12:00:00.000Z",
+      updatedAt: "2026-07-20T12:00:01.000Z",
+      revision: 2,
+      cancellable: true,
+    }
+    expect(
+      isWikiIngestChangedEvent({
+        workspaceId: "workspace_12345678",
+        job: runningJob,
+      })
+    ).toBe(true)
+    expect(
+      isWikiIngestChangedEvent({
+        workspaceId: "workspace_12345678",
+        job: { ...runningJob, status: "unknown" },
+      })
+    ).toBe(false)
+    expect(
+      isWikiIngestChangedEvent({
+        workspaceId: "workspace_12345678",
+        job: runningJob,
+        extra: true,
+      })
+    ).toBe(false)
+    expect(isWikiIngestChangedEvent({ workspaceId: 42, job: runningJob })).toBe(
+      false
+    )
   })
 })
 
@@ -162,7 +336,6 @@ describe("Pi credential contract validation", () => {
     expect(isPiConnectionStatus({ configured: true, secret: "leak" })).toBe(
       false
     )
-
     expect(
       isPiProviderSummaries([{ id: "zai", name: "ZAI Coding Plan (Global)" }])
     ).toBe(true)

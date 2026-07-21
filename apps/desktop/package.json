@@ -15,7 +15,7 @@
     "build": "node -e \"require('node:fs').rmSync('.vite', { recursive: true, force: true })\" && vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts && node src/main/sqlite-smoke.mjs",
+    "test": "vitest run && node src/main/sqlite-smoke.mjs",
     "package": "electron-forge package",
     "make": "electron-forge make"
   },
@@ -33,6 +33,7 @@
     "tsx": "4.21.0",
     "typescript": "6.0.3",
     "vite": "8.1.5",
+    "vitest": "4.1.6",
     "wait-on": "9.0.4"
   }
 }

@@ -1,7 +1,8 @@
-import { createHash, randomUUID } from "node:crypto"
-import { lstat, readFile, realpath, rm } from "node:fs/promises"
-import { basename, extname, join, resolve } from "node:path"
+import { randomUUID } from "node:crypto"
+import { lstat, readdir, readFile, realpath, rm } from "node:fs/promises"
+import { basename, extname, join, relative, resolve } from "node:path"
 
+import { isReadWikiFileInput } from "@workspace/contract"
 import type {
   AmendError,
   AmendErrorCode,
@@ -9,8 +10,12 @@ import type {
   CreateWorkspaceInput,
   IngestDocumentInput,
   IngestPastedSourceResult,
+  ReadWikiFileInput,
   SourceDocumentSelection,
   StartIngestResult,
+  WikiFileContent,
+  WikiFileTreeItem,
+  WikiIngestChangedEvent,
   WikiIngestJob,
   WikiIndexRefreshSummary,
   WikiProgressEvent,
@@ -18,6 +23,7 @@ import type {
   WikiSearchResult,
   WikiTagFacet,
   WorkspaceParentSelection,
+  WorkspaceListItem,
   WorkspaceSummary,
 } from "@workspace/contract"
 import type {
@@ -28,6 +34,13 @@ import { openWikiIndex, WikiIndexError } from "@workspace/wiki-engine/index"
 import type { WikiIndex } from "@workspace/wiki-engine/index"
 import { createWikiEngine } from "@workspace/wiki-engine/ingest"
 import type { WikiAgent, WikiEngine } from "@workspace/wiki-engine/ingest"
+import {
+  migrateWorkspace,
+  readWorkspace,
+} from "@workspace/wiki-engine/workspace"
+import type { WikiWorkspace } from "@workspace/wiki-engine/workspace"
+
+import { WorkspaceCatalog } from "./workspace-catalog.ts"
 
 interface ActiveWorkspace {
   summary: WorkspaceSummary
@@ -42,10 +55,24 @@ interface ParentSelection {
 
 interface SelectedDocument {
   ownerId: number
+  workspaceId?: string
   path: string
   displayName: string
   title: string
   extension: string
+}
+
+interface WorkspaceCatalogApi {
+  listWorkspaces: WorkspaceCatalog["listWorkspaces"]
+  findLastActiveWorkspace: WorkspaceCatalog["findLastActiveWorkspace"]
+  upsertAndActivate: WorkspaceCatalog["upsertAndActivate"]
+  clearLastActive: WorkspaceCatalog["clearLastActive"]
+}
+
+interface RunningIngest {
+  workspaceId: string
+  jobId: string
+  controller: AbortController
 }
 
 interface WorkspaceServiceOptions {
@@ -61,6 +88,11 @@ interface WorkspaceServiceOptions {
     workspacePath: string
     databasePath: string
   }) => Promise<WikiIndex>
+  catalog?: WorkspaceCatalogApi
+  readWorkspace?: (input: { workspacePath: string }) => Promise<WikiWorkspace>
+  migrateWorkspace?: (input: {
+    workspacePath: string
+  }) => Promise<WikiWorkspace>
 }
 
 export class WorkspaceServiceError extends Error {
@@ -77,22 +109,32 @@ export class WorkspaceService {
   private readonly options: WorkspaceServiceOptions
   private readonly createId: () => string
   private readonly now: () => Date
+  private readonly catalog: WorkspaceCatalogApi
   private readonly selections = new Map<string, ParentSelection>()
   private readonly documents = new Map<string, SelectedDocument>()
-  private readonly jobListeners = new Set<(job: WikiIngestJob) => void>()
+  private readonly contexts = new Map<string, ActiveWorkspace>()
+  private readonly jobs = new Map<string, WikiIngestJob>()
+  private readonly jobListeners = new Set<
+    (event: WikiIngestChangedEvent) => void
+  >()
   private active: ActiveWorkspace | undefined
-  private currentJob: WikiIngestJob | undefined
-  private operation: Promise<unknown> | undefined
-  private ingestController: AbortController | undefined
+  private lifecycleOperation: Promise<unknown> | undefined
+  private modelOperation: Promise<unknown> | undefined
+  private runningIngest: RunningIngest | undefined
   private disposed = false
 
   constructor(options: WorkspaceServiceOptions) {
     this.options = options
     this.createId = options.createId ?? randomUUID
     this.now = options.now ?? (() => new Date())
+    this.catalog =
+      options.catalog ??
+      new WorkspaceCatalog({ userDataPath: options.userDataPath })
   }
 
-  subscribeIngestChanged(listener: (job: WikiIngestJob) => void): () => void {
+  subscribeIngestChanged(
+    listener: (event: WikiIngestChangedEvent) => void
+  ): () => void {
     this.jobListeners.add(listener)
     return () => this.jobListeners.delete(listener)
   }
@@ -124,7 +166,7 @@ export class WorkspaceService {
     input: CreateWorkspaceInput
   ): Promise<WorkspaceSummary> {
     this.assertOpen()
-    if (this.operation) {
+    if (this.lifecycleOperation) {
       throw new WorkspaceServiceError("busy", "Amend is already working.")
     }
     const selection = this.selections.get(input.selectionToken)
@@ -140,11 +182,13 @@ export class WorkspaceService {
       await assertTargetDoesNotExist(workspacePath)
       return await this.initializeWorkspace(workspacePath, input)
     })
-    this.operation = operation
+    this.lifecycleOperation = operation
     try {
       return await operation
     } finally {
-      if (this.operation === operation) this.operation = undefined
+      if (this.lifecycleOperation === operation) {
+        this.lifecycleOperation = undefined
+      }
     }
   }
 
@@ -153,6 +197,7 @@ export class WorkspaceService {
     documentPath: string
   ): Promise<SourceDocumentSelection> {
     this.assertOpen()
+    const workspaceId = this.active?.summary.id
     const path = await realpath(resolve(documentPath)).catch((error) => {
       throw new WorkspaceServiceError(
         "invalid-input",
@@ -189,6 +234,7 @@ export class WorkspaceService {
     )
     this.documents.set(token, {
       ownerId,
+      ...(workspaceId ? { workspaceId } : {}),
       path,
       displayName,
       title,
@@ -202,9 +248,112 @@ export class WorkspaceService {
     return this.active?.summary ?? null
   }
 
+  async listWorkspaces(): Promise<readonly WorkspaceListItem[]> {
+    this.assertOpen()
+    const records = await this.catalog.listWorkspaces()
+    return records.map((record) => ({
+      id: record.id,
+      name: basename(record.path) || record.path,
+      displayPath: record.path,
+      active: this.active?.summary.id === record.id,
+      running: this.jobs.get(record.id)?.status === "running",
+    }))
+  }
+
+  async activateWorkspace(workspaceId: string): Promise<WorkspaceSummary> {
+    this.assertOpen()
+    if (this.lifecycleOperation) {
+      throw new WorkspaceServiceError("busy", "Amend is already working.")
+    }
+    const operation = Promise.resolve().then(async () => {
+      const record = (await this.catalog.listWorkspaces()).find(
+        ({ id }) => id === workspaceId
+      )
+      if (!record) {
+        throw new WorkspaceServiceError(
+          "invalid-input",
+          "The workspace was not found."
+        )
+      }
+      return await this.openAndActivateWorkspace(record.path, record.id)
+    })
+    this.lifecycleOperation = operation
+    try {
+      return await operation
+    } finally {
+      if (this.lifecycleOperation === operation) {
+        this.lifecycleOperation = undefined
+      }
+    }
+  }
+
+  async openWorkspace(workspacePath: string): Promise<WorkspaceSummary> {
+    this.assertOpen()
+    if (this.lifecycleOperation) {
+      throw new WorkspaceServiceError("busy", "Amend is already working.")
+    }
+    const operation = Promise.resolve().then(() =>
+      this.openAndActivateWorkspace(workspacePath)
+    )
+    this.lifecycleOperation = operation
+    try {
+      return await operation
+    } finally {
+      if (this.lifecycleOperation === operation) {
+        this.lifecycleOperation = undefined
+      }
+    }
+  }
+
+  async restoreLastActiveWorkspace(): Promise<WorkspaceSummary | null> {
+    this.assertOpen()
+    if (this.lifecycleOperation) {
+      throw new WorkspaceServiceError("busy", "Amend is already working.")
+    }
+    const operation = Promise.resolve().then(async () => {
+      let record
+      try {
+        record = await this.catalog.findLastActiveWorkspace()
+      } catch (error) {
+        console.error("[amend] failed to read the workspace catalog:", error)
+        return null
+      }
+      if (!record) {
+        await this.catalog.clearLastActive().catch((error: unknown) => {
+          console.error(
+            "[amend] failed to clear an invalid active workspace record:",
+            error
+          )
+        })
+        return null
+      }
+
+      try {
+        return await this.openAndActivateWorkspace(record.path, record.id)
+      } catch (error) {
+        console.error("[amend] failed to restore the last workspace:", error)
+        await this.catalog.clearLastActive().catch((clearError: unknown) => {
+          console.error(
+            "[amend] failed to clear the stale active workspace:",
+            clearError
+          )
+        })
+        return null
+      }
+    })
+    this.lifecycleOperation = operation
+    try {
+      return await operation
+    } finally {
+      if (this.lifecycleOperation === operation) {
+        this.lifecycleOperation = undefined
+      }
+    }
+  }
+
   getCurrentIngest(): WikiIngestJob | null {
     this.assertOpen()
-    return this.currentJob ?? null
+    return this.active ? (this.jobs.get(this.active.summary.id) ?? null) : null
   }
 
   async startIngest(
@@ -213,11 +362,16 @@ export class WorkspaceService {
   ): Promise<StartIngestResult> {
     this.assertOpen()
     const active = this.requireActive()
-    if (this.operation) {
+    if (this.modelOperation) {
       throw new WorkspaceServiceError("busy", "Amend is already working.")
     }
     const document = this.documents.get(input.documentToken)
-    if (!document || document.ownerId !== ownerId) {
+    if (
+      !document ||
+      document.ownerId !== ownerId ||
+      (document.workspaceId !== undefined &&
+        document.workspaceId !== active.summary.id)
+    ) {
       throw new WorkspaceServiceError(
         "invalid-input",
         "Choose the source document again."
@@ -227,7 +381,7 @@ export class WorkspaceService {
 
     const jobId = this.nextJobId()
     const timestamp = this.now().toISOString()
-    this.currentJob = {
+    const job: WikiIngestJob = {
       id: jobId,
       title: document.title,
       status: "running",
@@ -238,25 +392,30 @@ export class WorkspaceService {
       revision: 0,
       cancellable: true,
     }
+    this.jobs.set(active.summary.id, job)
     const controller = new AbortController()
-    this.ingestController = controller
-    const operation = this.ingest(
-      active,
-      document,
-      input.objective,
-      controller.signal
+    const operation = Promise.resolve().then(() =>
+      this.ingest(active, jobId, document, input.objective, controller.signal)
     )
-    this.operation = operation
-    this.emitCurrentJob()
+    this.modelOperation = operation
+    this.runningIngest = {
+      workspaceId: active.summary.id,
+      jobId,
+      controller,
+    }
+    this.emitJob(active.summary.id)
     void operation
       .then(
-        (result) => this.completeIngest(jobId, result),
-        (error: unknown) => this.failIngest(jobId, error)
+        (result) => this.completeIngest(active.summary.id, jobId, result),
+        (error: unknown) => this.failIngest(active.summary.id, jobId, error)
       )
       .finally(() => {
-        if (this.operation === operation) this.operation = undefined
-        if (this.ingestController === controller) {
-          this.ingestController = undefined
+        if (this.modelOperation === operation) this.modelOperation = undefined
+        if (
+          this.runningIngest?.workspaceId === active.summary.id &&
+          this.runningIngest.jobId === jobId
+        ) {
+          this.runningIngest = undefined
         }
       })
     return { jobId }
@@ -264,20 +423,33 @@ export class WorkspaceService {
 
   cancelIngest(input: CancelIngestInput): void {
     this.assertOpen()
-    if (!this.currentJob || this.currentJob.id !== input.jobId) {
+    const entry = [...this.jobs.entries()].find(
+      ([, job]) => job.id === input.jobId
+    )
+    if (!entry) {
       throw new WorkspaceServiceError(
         "invalid-input",
         "The ingest job was not found."
       )
     }
-    if (this.currentJob.status !== "running") return
-    if (!this.currentJob.cancellable) {
+    const [workspaceId, job] = entry
+    if (job.status !== "running") return
+    if (!job.cancellable) {
       throw new WorkspaceServiceError(
         "operation-failed",
         "The ingest can no longer be cancelled because its commit has started."
       )
     }
-    this.ingestController?.abort(
+    if (
+      this.runningIngest?.workspaceId !== workspaceId ||
+      this.runningIngest.jobId !== input.jobId
+    ) {
+      throw new WorkspaceServiceError(
+        "invalid-input",
+        "The ingest job was not found."
+      )
+    }
+    this.runningIngest.controller.abort(
       new DOMException("The ingest was cancelled", "AbortError")
     )
   }
@@ -300,9 +472,74 @@ export class WorkspaceService {
     }
   }
 
+  async listFiles(): Promise<readonly WikiFileTreeItem[]> {
+    this.assertOpen()
+    const active = this.requireActive()
+    try {
+      return await listWorkspaceFiles(active.workspacePath)
+    } catch (error) {
+      throw new WorkspaceServiceError(
+        "operation-failed",
+        "Workspace files could not be loaded.",
+        { cause: error }
+      )
+    }
+  }
+
+  async readFile(input: ReadWikiFileInput): Promise<WikiFileContent> {
+    this.assertOpen()
+    const active = this.requireActive()
+    if (!isReadWikiFileInput(input)) {
+      throw new WorkspaceServiceError("invalid-input", "Choose a wiki file.")
+    }
+    const { absolutePath, relativePath } = workspaceFilePath(
+      active.workspacePath,
+      input.path
+    )
+    const metadata = await lstat(absolutePath).catch((error) => {
+      throw new WorkspaceServiceError(
+        "invalid-input",
+        "The selected wiki file is not available.",
+        { cause: error }
+      )
+    })
+    if (!metadata.isFile()) {
+      throw new WorkspaceServiceError("invalid-input", "Choose a wiki file.")
+    }
+    const mediaType = wikiFileMediaType(relativePath)
+    if (mediaType === "binary") {
+      return {
+        path: relativePath,
+        name: basename(relativePath),
+        mediaType,
+        size: metadata.size,
+      }
+    }
+    if (metadata.size > 1_000_000) {
+      throw new WorkspaceServiceError(
+        "invalid-input",
+        "The selected text file is too large to preview."
+      )
+    }
+    const content = (await readFile(absolutePath)).toString("utf8")
+    if (content.includes("\0")) {
+      throw new WorkspaceServiceError(
+        "invalid-input",
+        "The selected wiki file is not valid UTF-8 text."
+      )
+    }
+    return {
+      path: relativePath,
+      name: basename(relativePath),
+      mediaType,
+      size: metadata.size,
+      content: content.replace(/^\uFEFF/, ""),
+    }
+  }
+
   async refreshIndex(): Promise<WikiIndexRefreshSummary> {
     this.assertOpen()
-    if (this.operation) {
+    if (this.modelOperation) {
       throw new WorkspaceServiceError("busy", "Amend is already working.")
     }
     const active = this.requireActive()
@@ -316,41 +553,54 @@ export class WorkspaceService {
         )
       }
     })
-    this.operation = operation
+    this.modelOperation = operation
     try {
       const summary = await operation
+      const job = this.jobs.get(active.summary.id)
       if (
-        this.currentJob?.status === "completed" &&
-        this.currentJob.result?.index.status === "failed"
+        job?.status === "completed" &&
+        job.result?.index.status === "failed"
       ) {
-        this.currentJob = {
-          ...this.currentJob,
+        this.jobs.set(active.summary.id, {
+          ...job,
           updatedAt: this.now().toISOString(),
-          revision: this.currentJob.revision + 1,
+          revision: job.revision + 1,
           result: {
-            ...this.currentJob.result,
+            ...job.result,
             index: { status: "ready", summary },
           },
-        }
-        this.emitCurrentJob()
+        })
+        this.emitJob(active.summary.id)
       }
       return summary
     } finally {
-      if (this.operation === operation) this.operation = undefined
+      if (this.modelOperation === operation) this.modelOperation = undefined
     }
   }
 
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
-    if (this.currentJob?.cancellable) {
-      this.ingestController?.abort(
+    const running = this.runningIngest
+    if (running && this.jobs.get(running.workspaceId)?.cancellable) {
+      running.controller.abort(
         new DOMException("The ingest was cancelled", "AbortError")
       )
     }
-    await this.operation?.catch(() => undefined)
-    await this.active?.index.close()
+    await Promise.all([
+      this.lifecycleOperation?.catch(() => undefined),
+      this.modelOperation?.catch(() => undefined),
+    ])
+    await Promise.all(
+      [...this.contexts.values()].map(({ index }) =>
+        index.close().catch((error: unknown) => {
+          console.error("[amend] failed to close a wiki index:", error)
+        })
+      )
+    )
     this.active = undefined
+    this.contexts.clear()
+    this.jobs.clear()
     this.selections.clear()
     this.documents.clear()
     this.jobListeners.clear()
@@ -377,22 +627,21 @@ export class WorkspaceService {
       })
       initialized = true
       const canonicalPath = await realpath(wiki.workspacePath)
-      index = await (this.options.openIndex ?? openWikiIndex)({
-        workspacePath: canonicalPath,
-        databasePath: indexPath(this.options.userDataPath, canonicalPath),
-      })
+      index = await this.openWorkspaceIndex(canonicalPath, wiki.id)
       await index.refresh()
       const summary: WorkspaceSummary = {
-        id: workspaceId(canonicalPath),
+        id: wiki.id,
         name: input.name,
         domain: input.domain.trim(),
         displayPath: canonicalPath,
         commitHash: wiki.commitHash,
+        setupStatus: "initialized",
       }
-      const previous = this.active
-      await previous?.index.close()
-      this.active = { summary, workspacePath: canonicalPath, index }
-      this.currentJob = undefined
+      await this.setActiveWorkspace({
+        summary,
+        workspacePath: canonicalPath,
+        index,
+      })
       return summary
     } catch (error) {
       await index?.close().catch(() => undefined)
@@ -417,19 +666,143 @@ export class WorkspaceService {
     }
   }
 
+  private async openAndActivateWorkspace(
+    workspacePath: string,
+    expectedId?: string
+  ): Promise<WorkspaceSummary> {
+    let index: WikiIndex | undefined
+    try {
+      const canonicalPath = await realpath(resolve(workspacePath))
+      const wiki = await this.readOrMigrateWorkspace(canonicalPath)
+      if (expectedId !== undefined && wiki.id !== expectedId) {
+        throw new Error("The workspace ID does not match the catalog record")
+      }
+      const existing = this.contexts.get(wiki.id)
+      if (existing?.workspacePath === canonicalPath) {
+        await this.setActiveWorkspace(existing)
+        return existing.summary
+      }
+      index = await this.openWorkspaceIndex(canonicalPath, wiki.id, existing)
+      const refresh = await index.refresh()
+      const summary: WorkspaceSummary = {
+        id: wiki.id,
+        name: basename(canonicalPath) || canonicalPath,
+        domain: wiki.domain,
+        displayPath: canonicalPath,
+        commitHash: refresh.commitHash,
+        setupStatus: wiki.setupStatus,
+      }
+      await this.setActiveWorkspace({
+        summary,
+        workspacePath: canonicalPath,
+        index,
+      })
+      return summary
+    } catch (error) {
+      await index?.close().catch(() => undefined)
+      if (error instanceof WorkspaceServiceError) throw error
+      if (isGitUnavailable(error)) {
+        throw new WorkspaceServiceError(
+          "git-unavailable",
+          "Git is required to open an Amend wiki.",
+          { cause: error }
+        )
+      }
+      throw new WorkspaceServiceError(
+        "workspace-open-failed",
+        "The wiki workspace could not be opened.",
+        { cause: error }
+      )
+    }
+  }
+
+  private async readOrMigrateWorkspace(
+    workspacePath: string
+  ): Promise<WikiWorkspace> {
+    try {
+      return await (this.options.readWorkspace ?? readWorkspace)({
+        workspacePath,
+      })
+    } catch {
+      return await (this.options.migrateWorkspace ?? migrateWorkspace)({
+        workspacePath,
+      })
+    }
+  }
+
+  private async setActiveWorkspace(candidate: ActiveWorkspace): Promise<void> {
+    await this.catalog.upsertAndActivate({
+      id: candidate.summary.id,
+      path: candidate.workspacePath,
+    })
+
+    const replaced = this.contexts.get(candidate.summary.id)
+    this.contexts.set(candidate.summary.id, candidate)
+    this.active = candidate
+    if (replaced && replaced !== candidate) {
+      await replaced.index.close().catch((error: unknown) => {
+        console.error("[amend] failed to close a replaced wiki index:", error)
+      })
+    }
+  }
+
+  private async openWorkspaceIndex(
+    workspacePath: string,
+    workspaceId: string,
+    replaced?: ActiveWorkspace
+  ): Promise<WikiIndex> {
+    const databasePath = indexPath(this.options.userDataPath, workspaceId)
+    const open = this.options.openIndex ?? openWikiIndex
+    try {
+      return await open({ workspacePath, databasePath })
+    } catch (error) {
+      if (
+        !(error instanceof WikiIndexError) ||
+        error.code !== "invalid-database"
+      ) {
+        throw error
+      }
+
+      // The index is a derived cache. A moved workspace keeps its stable ID but
+      // needs a fresh cache because older indexes are bound to the prior path.
+      if (replaced) await this.closeWorkspaceContext(workspaceId, replaced)
+      await Promise.all(
+        [databasePath, `${databasePath}-shm`, `${databasePath}-wal`].map(
+          (path) => rm(path, { force: true })
+        )
+      )
+      return await open({ workspacePath, databasePath })
+    }
+  }
+
+  private async closeWorkspaceContext(
+    workspaceId: string,
+    context: ActiveWorkspace
+  ): Promise<void> {
+    if (this.contexts.get(workspaceId) === context) {
+      this.contexts.delete(workspaceId)
+    }
+    if (this.active === context) this.active = undefined
+    await context.index.close().catch((error: unknown) => {
+      console.error("[amend] failed to close a replaced wiki index:", error)
+    })
+  }
+
   private async ingest(
     active: ActiveWorkspace,
+    jobId: string,
     document: SelectedDocument,
     objective: string,
     signal: AbortSignal
   ): Promise<IngestPastedSourceResult> {
+    const workspaceId = active.summary.id
     try {
-      this.updateCurrentJob({
+      this.updateJob(workspaceId, jobId, {
         phase: "preparing",
         message: "Preparing the source",
       })
       const agent = await this.createAgent((event) =>
-        this.updateCurrentJob(piProgress(event))
+        this.updateJob(workspaceId, jobId, piProgress(event))
       )
       signal.throwIfAborted()
       const engine = this.createEngine(agent)
@@ -451,13 +824,13 @@ export class WorkspaceService {
         instruction: objective,
         signal,
         onCommitStart: () =>
-          this.updateCurrentJob({
+          this.updateJob(workspaceId, jobId, {
             phase: "committing",
             message: "Committing the wiki changes",
             cancellable: false,
           }),
       })
-      this.updateCurrentJob({
+      this.updateJob(workspaceId, jobId, {
         phase: "indexing",
         message: "Indexing the new knowledge",
         cancellable: false,
@@ -552,65 +925,79 @@ export class WorkspaceService {
     }
   }
 
-  private updateCurrentJob(
+  private updateJob(
+    workspaceId: string,
+    jobId: string,
     update: Partial<Pick<WikiIngestJob, "phase" | "message" | "cancellable">>
   ): void {
-    if (!this.currentJob || this.currentJob.status !== "running") return
-    this.currentJob = {
-      ...this.currentJob,
+    const job = this.jobs.get(workspaceId)
+    if (!job || job.id !== jobId || job.status !== "running") return
+    this.jobs.set(workspaceId, {
+      ...job,
       ...update,
       updatedAt: this.now().toISOString(),
-      revision: this.currentJob.revision + 1,
-    }
-    this.emitCurrentJob()
+      revision: job.revision + 1,
+    })
+    this.emitJob(workspaceId)
   }
 
   private completeIngest(
+    workspaceId: string,
     jobId: string,
     result: IngestPastedSourceResult
   ): void {
-    if (!this.currentJob || this.currentJob.id !== jobId) return
-    if (this.active) {
-      this.active = {
-        ...this.active,
-        summary: { ...this.active.summary, commitHash: result.commitHash },
+    const job = this.jobs.get(workspaceId)
+    if (!job || job.id !== jobId) return
+    const context = this.contexts.get(workspaceId)
+    if (context) {
+      const updated: ActiveWorkspace = {
+        ...context,
+        summary: {
+          ...context.summary,
+          commitHash: result.commitHash,
+          setupStatus: "ready",
+        },
       }
+      this.contexts.set(workspaceId, updated)
+      if (this.active?.summary.id === workspaceId) this.active = updated
     }
-    this.currentJob = {
-      ...this.currentJob,
+    this.jobs.set(workspaceId, {
+      ...job,
       status: "completed",
       message:
         result.index.status === "ready"
           ? "The source is ready to search"
           : "The source was saved, but indexing needs to be retried",
       updatedAt: this.now().toISOString(),
-      revision: this.currentJob.revision + 1,
+      revision: job.revision + 1,
       cancellable: false,
       result,
-    }
-    this.emitCurrentJob()
+    })
+    this.emitJob(workspaceId)
   }
 
-  private failIngest(jobId: string, error: unknown): void {
-    if (!this.currentJob || this.currentJob.id !== jobId) return
+  private failIngest(workspaceId: string, jobId: string, error: unknown): void {
+    const job = this.jobs.get(workspaceId)
+    if (!job || job.id !== jobId) return
     const amendError = toAmendError(error)
-    this.currentJob = {
-      ...this.currentJob,
+    this.jobs.set(workspaceId, {
+      ...job,
       status: amendError.code === "cancelled" ? "cancelled" : "failed",
       message: amendError.message,
       updatedAt: this.now().toISOString(),
-      revision: this.currentJob.revision + 1,
+      revision: job.revision + 1,
       cancellable: false,
       error: amendError,
-    }
-    this.emitCurrentJob()
+    })
+    this.emitJob(workspaceId)
   }
 
-  private emitCurrentJob(): void {
-    if (!this.currentJob) return
+  private emitJob(workspaceId: string): void {
+    const job = this.jobs.get(workspaceId)
+    if (!job) return
     for (const listener of this.jobListeners) {
       try {
-        listener(this.currentJob)
+        listener({ workspaceId, job })
       } catch {
         // Renderer delivery must not affect the main-owned job.
       }
@@ -619,10 +1006,89 @@ export class WorkspaceService {
 
   private nextJobId(): string {
     const candidate = jobIdFrom(this.createId())
-    return candidate === this.currentJob?.id
+    return [...this.jobs.values()].some(({ id }) => id === candidate)
       ? jobIdFrom(randomUUID())
       : candidate
   }
+}
+
+const hiddenWorkspaceEntries = new Set([".amend", ".git"])
+const maxFileTreeDepth = 8
+const maxFileTreeEntries = 500
+
+async function listWorkspaceFiles(
+  workspacePath: string
+): Promise<readonly WikiFileTreeItem[]> {
+  let remaining = maxFileTreeEntries
+  async function listDirectory(
+    absolutePath: string,
+    relativePath: string,
+    depth: number
+  ): Promise<WikiFileTreeItem[]> {
+    if (depth > maxFileTreeDepth || remaining <= 0) return []
+    const entries = await readdir(absolutePath, { withFileTypes: true })
+    const visible = entries
+      .filter((entry) => !hiddenWorkspaceEntries.has(entry.name))
+      .filter((entry) => !entry.name.startsWith("."))
+      .filter((entry) => entry.isDirectory() || entry.isFile())
+      .sort((left, right) => {
+        if (left.isDirectory() !== right.isDirectory()) {
+          return left.isDirectory() ? -1 : 1
+        }
+        return left.name.localeCompare(right.name)
+      })
+    const items: WikiFileTreeItem[] = []
+    for (const entry of visible) {
+      if (remaining <= 0) break
+      remaining -= 1
+      const path = relativePath ? `${relativePath}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        items.push({
+          path,
+          name: entry.name,
+          kind: "directory",
+          children: await listDirectory(
+            join(absolutePath, entry.name),
+            path,
+            depth + 1
+          ),
+        })
+      } else {
+        items.push({ path, name: entry.name, kind: "file" })
+      }
+    }
+    return items
+  }
+  return await listDirectory(workspacePath, "", 0)
+}
+
+function workspaceFilePath(
+  workspacePath: string,
+  inputPath: string
+): { absolutePath: string; relativePath: string } {
+  const root = resolve(workspacePath)
+  const absolutePath = resolve(root, inputPath)
+  const relativePath = relative(root, absolutePath)
+  if (
+    !relativePath ||
+    relativePath.startsWith("..") ||
+    resolve(root, relativePath) !== absolutePath ||
+    relativePath
+      .split(/[/\\]/)
+      .some((part) => hiddenWorkspaceEntries.has(part) || part.startsWith("."))
+  ) {
+    throw new WorkspaceServiceError("invalid-input", "Choose a wiki file.")
+  }
+  return { absolutePath, relativePath: relativePath.replaceAll("\\", "/") }
+}
+
+function wikiFileMediaType(path: string): WikiFileContent["mediaType"] {
+  const extension = extname(path).toLowerCase()
+  if ([".md", ".markdown"].includes(extension)) return "markdown"
+  if ([".txt", ".text", ".json", ".yaml", ".yml"].includes(extension)) {
+    return "text"
+  }
+  return "binary"
 }
 
 async function assertTargetDoesNotExist(path: string): Promise<void> {
@@ -642,16 +1108,8 @@ async function assertTargetDoesNotExist(path: string): Promise<void> {
   )
 }
 
-function indexPath(userDataPath: string, workspacePath: string): string {
-  return join(
-    userDataPath,
-    "indexes",
-    `${createHash("sha256").update(workspacePath).digest("hex")}.sqlite`
-  )
-}
-
-function workspaceId(workspacePath: string): string {
-  return createHash("sha256").update(workspacePath).digest("hex").slice(0, 24)
+function indexPath(userDataPath: string, workspaceId: string): string {
+  return join(userDataPath, "indexes", `${workspaceId}.sqlite`)
 }
 
 function tokenFromId(id: string): string {

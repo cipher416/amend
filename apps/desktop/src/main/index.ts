@@ -61,9 +61,9 @@ function createWindow() {
        origin: window.location.origin,
        nodeType: typeof window.process,
        runtime: window.amend?.runtime,
-       hasWorkspaceApi: typeof window.amend?.workspace?.create === "function",
+       hasWorkspaceApi: typeof window.amend?.workspaces?.create === "function",
        hasWikiApi: typeof window.amend?.wiki?.search === "function",
-       hasPiApi: typeof window.amend?.pi?.status === "function"
+       hasProviderApi: typeof window.amend?.providers?.status === "function"
      })`)
     const passed =
       result.origin === rendererOrigin &&
@@ -71,7 +71,7 @@ function createWindow() {
       result.runtime === "electron" &&
       result.hasWorkspaceApi === true &&
       result.hasWikiApi === true &&
-      result.hasPiApi === true
+      result.hasProviderApi === true
 
     console.log("AMEND_SMOKE_RESULT", JSON.stringify(result))
     app.exit(passed ? 0 : 1)
@@ -106,6 +106,9 @@ app.whenReady().then(async () => {
       appPath: app.getAppPath(),
       resourcesPath: process.resourcesPath,
     }),
+  })
+  await workspaceService.restoreLastActiveWorkspace().catch((error: unknown) => {
+    console.error("[amend] workspace restoration failed:", error)
   })
   disposeIpc = registerWikiIpc({
     service: workspaceService,

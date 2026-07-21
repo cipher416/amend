@@ -1,4 +1,5 @@
 import {
+  isActivateWorkspaceInput,
   isCancelIngestInput,
   isCreateWorkspaceInput,
   isIngestDocumentInput,
@@ -7,6 +8,7 @@ import {
   isPiRespondToPromptInput,
   isPiSaveApiKeyInput,
   isPiSetDefaultModelInput,
+  isReadWikiFileInput,
   isStartPiOAuthLoginInput,
   isWikiSearchInput,
 } from "@workspace/contract"
@@ -34,15 +36,15 @@ interface PiIpcOptions extends IpcAuthContext {
 }
 
 export function registerWikiIpc(options: WikiIpcOptions): () => void {
-  const unsubscribeIngest = options.service.subscribeIngestChanged((job) => {
+  const unsubscribeIngest = options.service.subscribeIngestChanged((event) => {
     const window = options.getWindow()
     if (window && !window.isDestroyed()) {
-      window.webContents.send(amendChannels.ingestChanged, job)
+      window.webContents.send(amendChannels.ingestChanged, event)
     }
   })
 
   ipcMain.handle(
-    amendChannels.chooseWorkspaceParent,
+    amendChannels.chooseWorkspaceLocation,
     authorized(options, async (event) => {
       const window = options.getWindow()
       if (!window) return failure("unauthorized", "The window is unavailable.")
@@ -72,12 +74,47 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
   )
 
   ipcMain.handle(
+    amendChannels.openWorkspace,
+    authorized(options, async () => {
+      const window = options.getWindow()
+      if (!window) return failure("unauthorized", "The window is unavailable.")
+      const selection = await dialog.showOpenDialog(window, {
+        title: "Open an existing wiki",
+        buttonLabel: "Open workspace",
+        properties: ["openDirectory"],
+      })
+      if (selection.canceled || !selection.filePaths[0]) return success(null)
+      return await attempt(() =>
+        options.service.openWorkspace(selection.filePaths[0])
+      )
+    })
+  )
+
+  ipcMain.handle(
     amendChannels.getCurrentWorkspace,
     authorized(
       options,
       async () =>
         await attempt(async () => options.service.getCurrentWorkspace())
     )
+  )
+
+  ipcMain.handle(
+    amendChannels.listWorkspaces,
+    authorized(
+      options,
+      async () => await attempt(async () => options.service.listWorkspaces())
+    )
+  )
+
+  ipcMain.handle(
+    amendChannels.activateWorkspace,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isActivateWorkspaceInput(input)) return invalidInput()
+      return await attempt(async () =>
+        options.service.activateWorkspace(input.workspaceId)
+      )
+    })
   )
 
   ipcMain.handle(
@@ -154,6 +191,22 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
   )
 
   ipcMain.handle(
+    amendChannels.listWikiFiles,
+    authorized(
+      options,
+      async () => await attempt(async () => options.service.listFiles())
+    )
+  )
+
+  ipcMain.handle(
+    amendChannels.readWikiFile,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isReadWikiFileInput(input)) return invalidInput()
+      return await attempt(async () => options.service.readFile(input))
+    })
+  )
+
+  ipcMain.handle(
     amendChannels.searchWiki,
     authorized(options, async (_event, input: unknown) => {
       if (!isWikiSearchInput(input)) return invalidInput()
@@ -172,15 +225,20 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
   return () => {
     unsubscribeIngest()
     for (const channel of [
-      amendChannels.chooseWorkspaceParent,
+      amendChannels.chooseWorkspaceLocation,
       amendChannels.createWorkspace,
+      amendChannels.openWorkspace,
       amendChannels.getCurrentWorkspace,
+      amendChannels.listWorkspaces,
+      amendChannels.activateWorkspace,
       amendChannels.chooseSourceDocument,
       amendChannels.registerSourceDocument,
       amendChannels.startIngest,
       amendChannels.getCurrentIngest,
       amendChannels.cancelIngest,
       amendChannels.refreshWikiIndex,
+      amendChannels.listWikiFiles,
+      amendChannels.readWikiFile,
       amendChannels.searchWiki,
       amendChannels.listWikiTags,
     ]) {
@@ -193,12 +251,12 @@ export function registerPiIpc(options: PiIpcOptions): () => void {
   const unsubscribeLogin = options.service.subscribeLoginEvents((event) => {
     const window = options.getWindow()
     if (window && !window.isDestroyed()) {
-      window.webContents.send(amendChannels.piLoginEvent, event)
+      window.webContents.send(amendChannels.providerOAuthEvent, event)
     }
   })
 
   ipcMain.handle(
-    amendChannels.piStatus,
+    amendChannels.getProviderStatus,
     authorized(
       options,
       async () => await attempt(async () => options.service.status())
@@ -206,7 +264,7 @@ export function registerPiIpc(options: PiIpcOptions): () => void {
   )
 
   ipcMain.handle(
-    amendChannels.listPiApiKeyProviders,
+    amendChannels.listProviders,
     authorized(
       options,
       async () =>
@@ -215,7 +273,7 @@ export function registerPiIpc(options: PiIpcOptions): () => void {
   )
 
   ipcMain.handle(
-    amendChannels.listPiModels,
+    amendChannels.listProviderModels,
     authorized(options, async (_event, input: unknown) => {
       if (!isPiListModelsInput(input)) return invalidInput()
       return await attempt(async () =>
@@ -225,7 +283,7 @@ export function registerPiIpc(options: PiIpcOptions): () => void {
   )
 
   ipcMain.handle(
-    amendChannels.startPiOAuthLogin,
+    amendChannels.startProviderOAuth,
     authorized(options, async (_event, input: unknown) => {
       if (!isStartPiOAuthLoginInput(input)) return invalidInput()
       return await attempt(async () =>
@@ -235,7 +293,7 @@ export function registerPiIpc(options: PiIpcOptions): () => void {
   )
 
   ipcMain.handle(
-    amendChannels.respondToPiPrompt,
+    amendChannels.respondToProviderOAuthPrompt,
     authorized(options, async (_event, input: unknown) => {
       if (!isPiRespondToPromptInput(input)) return invalidInput()
       return await attempt(async () => {
@@ -250,7 +308,7 @@ export function registerPiIpc(options: PiIpcOptions): () => void {
   )
 
   ipcMain.handle(
-    amendChannels.cancelPiLogin,
+    amendChannels.cancelProviderOAuth,
     authorized(options, async (_event, input: unknown) => {
       if (!isPiCancelLoginInput(input)) return invalidInput()
       return await attempt(async () => {
@@ -261,7 +319,7 @@ export function registerPiIpc(options: PiIpcOptions): () => void {
   )
 
   ipcMain.handle(
-    amendChannels.savePiApiKeyCredential,
+    amendChannels.connectProviderWithApiKey,
     authorized(options, async (_event, input: unknown) => {
       if (!isPiSaveApiKeyInput(input)) return invalidInput()
       return await attempt(async () => {
@@ -272,7 +330,7 @@ export function registerPiIpc(options: PiIpcOptions): () => void {
   )
 
   ipcMain.handle(
-    amendChannels.setPiDefaultModel,
+    amendChannels.setDefaultProviderModel,
     authorized(options, async (_event, input: unknown) => {
       if (!isPiSetDefaultModelInput(input)) return invalidInput()
       return await attempt(async () => {
@@ -285,14 +343,14 @@ export function registerPiIpc(options: PiIpcOptions): () => void {
   return () => {
     unsubscribeLogin()
     for (const channel of [
-      amendChannels.piStatus,
-      amendChannels.listPiApiKeyProviders,
-      amendChannels.listPiModels,
-      amendChannels.startPiOAuthLogin,
-      amendChannels.respondToPiPrompt,
-      amendChannels.cancelPiLogin,
-      amendChannels.savePiApiKeyCredential,
-      amendChannels.setPiDefaultModel,
+      amendChannels.getProviderStatus,
+      amendChannels.listProviders,
+      amendChannels.listProviderModels,
+      amendChannels.startProviderOAuth,
+      amendChannels.respondToProviderOAuthPrompt,
+      amendChannels.cancelProviderOAuth,
+      amendChannels.connectProviderWithApiKey,
+      amendChannels.setDefaultProviderModel,
     ]) {
       ipcMain.removeHandler(channel)
     }
