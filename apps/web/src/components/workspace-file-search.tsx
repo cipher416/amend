@@ -121,6 +121,18 @@ export function WorkspaceFileSearch({
           placeholder="Find in this file"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" || event.key === "Enter") {
+              event.preventDefault()
+              moveMatch(event.shiftKey ? -1 : 1)
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault()
+              moveMatch(-1)
+            } else if (event.key === "Escape") {
+              event.preventDefault()
+              closeSearch()
+            }
+          }}
         />
         <span
           aria-live="polite"

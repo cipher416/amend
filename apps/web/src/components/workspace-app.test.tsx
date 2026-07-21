@@ -410,7 +410,13 @@ describe("workspace app", () => {
     await user.keyboard("{Control>}f{/Control}")
     const findInput = await screen.findByPlaceholderText("Find in this file")
     await user.type(findInput, "Welcome")
-    await screen.findByText("1/1")
+    await screen.findByText("1/2")
+
+    await user.keyboard("{ArrowDown}")
+    await screen.findByText("2/2")
+
+    await user.keyboard("{ArrowUp}")
+    await screen.findByText("1/2")
 
     await user.click(screen.getByRole("button", { name: "Close find in file" }))
     expect(screen.queryByPlaceholderText("Find in this file")).toBeNull()
@@ -643,7 +649,7 @@ function createDesktopApi({
                   name: "index.md",
                   mediaType: "markdown",
                   size: 31,
-                  content: "# Reliability Wiki\n\nWelcome.",
+                  content: "# Reliability Wiki\n\nWelcome. Welcome.",
                 }
               : path === "concepts/checkpointing.md"
               ? {

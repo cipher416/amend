@@ -98,7 +98,7 @@ export function WorkspaceSearch({
         <HugeiconsIcon data-icon="inline-start" icon={Search01Icon} />
         <span className="hidden sm:inline">Search wiki</span>
         <span className="sr-only sm:hidden">Search wiki</span>
-        <kbd className="rounded-sm border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium text-muted-foreground">
+        <kbd className="ml-auto rounded-sm border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium text-muted-foreground">
           Ctrl K
         </kbd>
       </Button>
@@ -107,7 +107,7 @@ export function WorkspaceSearch({
         onOpenChange={onOpenChange}
         title={`Search ${workspace.name}`}
         description="Search indexed wiki pages and source material."
-        className="max-w-2xl border-border/80 bg-popover/95 shadow-2xl backdrop-blur-xl"
+        className="w-[calc(100%-2rem)] max-w-3xl border-border/80 bg-popover/95 shadow-2xl backdrop-blur-xl sm:max-w-3xl"
       >
           <Command className="p-2" shouldFilter={false}>
             <CommandInput
@@ -153,12 +153,14 @@ export function WorkspaceSearch({
                           {result.title}
                         </span>
                         <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                          <span className="shrink-0 font-mono text-[0.6875rem] text-foreground/65">
+                          <span className="min-w-0 truncate font-mono text-[0.6875rem] text-foreground/65">
                             {result.path}
                           </span>
-                          <span className="truncate">
-                            {result.heading ?? result.snippet}
-                          </span>
+                          {result.heading ? (
+                            <span className="min-w-0 truncate">
+                              {result.heading}
+                            </span>
+                          ) : null}
                         </span>
                       </span>
                       <Badge variant="secondary">
