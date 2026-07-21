@@ -28,6 +28,7 @@
     "./ingest": "./src/ingest/index.ts",
     "./agent/pi": "./src/agent/pi.ts",
     "./agent/pi-credentials": "./src/agent/pi-credentials.ts",
-    "./index": "./src/index/index.ts"
+    "./index": "./src/index/index.ts",
+    "./workspace": "./src/workspace.ts"
   }
 }

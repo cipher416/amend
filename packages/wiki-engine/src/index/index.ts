@@ -18,11 +18,8 @@ import {
   wikiSourceKindForPath,
 } from "../internal/format.ts"
 import type { WikiPageType, WikiSourceKind } from "../internal/format.ts"
-import {
-  git,
-  gitRaw,
-  validateWikiWorkspace,
-} from "../internal/git-workspace.ts"
+import { git, gitRaw } from "../internal/git.ts"
+import { resolveWorkspacePath } from "../workspace.ts"
 
 export type WikiIndexDocumentKind = "page" | "source"
 export type WikiIndexSearchScope = "all" | "pages" | "sources"
@@ -133,9 +130,9 @@ const endHighlight = "\u0002"
 export async function openWikiIndex(
   options: WikiIndexOptions
 ): Promise<WikiIndex> {
-  const workspacePath = await validateWikiWorkspace(
-    options.workspacePath
-  ).catch((error: unknown) => {
+  const workspacePath = await resolveWorkspacePath({
+    workspacePath: options.workspacePath,
+  }).catch((error: unknown) => {
     throw new WikiIndexError("invalid-workspace", "Invalid wiki workspace", {
       cause: error,
     })
@@ -265,7 +262,7 @@ class SqliteWikiIndex implements WikiIndex {
   private async refreshSnapshot(): Promise<WikiIndexRefreshResult> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        await validateWikiWorkspace(this.workspacePath).catch(
+        await resolveWorkspacePath({ workspacePath: this.workspacePath }).catch(
           (error: unknown) => {
             throw new WikiIndexError(
               "invalid-workspace",

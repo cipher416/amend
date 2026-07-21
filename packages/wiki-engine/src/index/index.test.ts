@@ -343,7 +343,11 @@ async function createWikiWorkspace(): Promise<string> {
   await Promise.all([
     writeFile(
       join(workspacePath, ".amend/workspace.json"),
-      `${JSON.stringify({ version: 1, domain: "Distributed systems" })}\n`
+      `${JSON.stringify({
+        version: 2,
+        id: "123e4567-e89b-42d3-a456-426614174000",
+        domain: "Distributed systems",
+      })}\n`
     ),
     writeFile(
       join(workspacePath, "concepts/write-ahead-logging.md"),

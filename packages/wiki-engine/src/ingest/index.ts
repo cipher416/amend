@@ -17,7 +17,9 @@ import {
   readWikiPageMetadata,
   wikiPageDirectories,
 } from "../internal/format.ts"
-import { git, validateWikiWorkspace } from "../internal/git-workspace.ts"
+import { git } from "../internal/git.ts"
+import { validateWorkspaceId } from "../internal/workspace-manifest.ts"
+import { resolveWorkspacePath } from "../workspace.ts"
 
 export interface WikiAgentRunInput {
   workspacePath: string
@@ -85,6 +87,7 @@ export interface WikiRunResult {
 
 export interface InitializedWiki {
   workspacePath: string
+  id: string
   commitHash: string
 }
 
@@ -102,8 +105,9 @@ export interface WikiEngine {
   }) => Promise<WikiRunResult>
 }
 
-interface WikiEngineOptions {
+export interface WikiEngineOptions {
   agent: WikiAgent
+  createWorkspaceId?: () => string
   createRunId?: () => string
   now?: () => Date
 }
@@ -121,6 +125,7 @@ const pageDirectories = wikiPageDirectories
 const managedRootFiles = new Set(["SCHEMA.md", "index.md", "log.md"])
 
 export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
+  const createWorkspaceId = options.createWorkspaceId ?? randomUUID
   const createRunId = options.createRunId ?? randomUUID
   const now = options.now ?? (() => new Date())
 
@@ -129,6 +134,7 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
       const workspacePath = resolve(input.workspacePath)
       const domain = input.domain.trim()
       if (!domain) throw new Error("Wiki domain is required")
+      const workspaceId = validateWorkspaceId(createWorkspaceId())
 
       await mkdir(workspacePath)
       try {
@@ -145,7 +151,11 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
         await Promise.all([
           writeFile(
             join(workspacePath, ".amend/workspace.json"),
-            `${JSON.stringify({ version: 1, domain }, null, 2)}\n`
+            `${JSON.stringify(
+              { version: 2, id: workspaceId, domain },
+              null,
+              2
+            )}\n`
           ),
           writeFile(join(workspacePath, "SCHEMA.md"), createSchema(domain)),
           writeFile(join(workspacePath, "index.md"), createIndex()),
@@ -172,6 +182,7 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
 
         return {
           workspacePath: await realpath(workspacePath),
+          id: workspaceId,
           commitHash: await git(workspacePath, "rev-parse", "HEAD"),
         }
       } catch (error) {
@@ -184,7 +195,9 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
 
     async ingest(input) {
       input.signal?.throwIfAborted()
-      const workspacePath = await validateWikiWorkspace(input.workspacePath)
+      const workspacePath = await resolveWorkspacePath({
+        workspacePath: input.workspacePath,
+      })
       input.signal?.throwIfAborted()
       const lockPath = join(workspacePath, ".git/amend-run.lock")
       const lock = await acquireLock(lockPath)
