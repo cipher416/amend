@@ -8,14 +8,14 @@ import type {
 import { themeSources } from "@workspace/contract"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 import { Button } from "@workspace/ui/components/button"
-import { Separator } from "@workspace/ui/components/separator"
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@workspace/ui/components/sheet"
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@workspace/ui/components/dialog"
+import { Separator } from "@workspace/ui/components/separator"
 import { SidebarMenuButton } from "@workspace/ui/components/sidebar"
 import { Spinner } from "@workspace/ui/components/spinner"
 import { useEffect, useState } from "react"
@@ -85,8 +85,8 @@ export function SettingsMenu({ desktop }: { desktop: AmendApi }) {
       >
         <HugeiconsIcon icon={Settings02Icon} />
       </SidebarMenuButton>
-      <Sheet open={open} onOpenChange={handleOpenChange}>
-        <SheetContent side="right">
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="flex max-h-[calc(100svh-2rem)] max-w-md flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
           {view === "connection" ? (
             <ConnectionSettings
               desktop={desktop}
@@ -115,8 +115,8 @@ export function SettingsMenu({ desktop }: { desktop: AmendApi }) {
               onManageConnection={() => setView("connection")}
             />
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
@@ -138,12 +138,12 @@ function SettingsOverview({
 
   return (
     <>
-      <SheetHeader>
-        <SheetTitle>Settings</SheetTitle>
-        <SheetDescription>
+      <DialogHeader className="px-6 pt-6">
+        <DialogTitle>Settings</DialogTitle>
+        <DialogDescription>
           Manage how Amend connects to and uses AI.
-        </SheetDescription>
-      </SheetHeader>
+        </DialogDescription>
+      </DialogHeader>
       <div className="flex min-h-0 flex-1 scroll-fade flex-col gap-6 overflow-y-auto px-6 pb-6">
         <SettingsSection
           title="AI connection"
@@ -224,6 +224,10 @@ function ConnectionSettings({
 }) {
   return (
     <div className="min-h-0 flex-1 scroll-fade overflow-y-auto px-6 pb-6">
+      <DialogTitle className="sr-only">AI connection</DialogTitle>
+      <DialogDescription className="sr-only">
+        Connect or change the AI provider Amend uses.
+      </DialogDescription>
       <Button type="button" variant="ghost" size="sm" onClick={onBack}>
         <HugeiconsIcon icon={ArrowLeft01Icon} data-icon="inline-start" />
         Back to settings
@@ -299,7 +303,7 @@ function ModelSettings({
 
   return (
     <>
-      <SheetHeader>
+      <DialogHeader className="px-6 pt-6">
         <Button
           type="button"
           variant="ghost"
@@ -310,11 +314,11 @@ function ModelSettings({
           <HugeiconsIcon icon={ArrowLeft01Icon} data-icon="inline-start" />
           Back to settings
         </Button>
-        <SheetTitle>Default model</SheetTitle>
-        <SheetDescription>
+        <DialogTitle>Default model</DialogTitle>
+        <DialogDescription>
           Select the model Amend uses to read documents and write your wiki.
-        </SheetDescription>
-      </SheetHeader>
+        </DialogDescription>
+      </DialogHeader>
       <div className="flex min-h-0 flex-1 flex-col gap-5 px-6 pb-6">
         {models ? (
           <ModelPicker

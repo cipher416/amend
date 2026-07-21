@@ -8,19 +8,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ThemeProvider } from "./theme"
 
-vi.mock("@workspace/ui/components/sheet", () => ({
-  Sheet: ({ open, children }: { open: boolean; children: ReactNode }) =>
+vi.mock("@workspace/ui/components/dialog", () => ({
+  Dialog: ({ open, children }: { open: boolean; children: ReactNode }) =>
     open ? <div>{children}</div> : null,
-  SheetContent: ({ children }: { children: ReactNode }) => (
+  DialogContent: ({ children }: { children: ReactNode }) => (
     <section>{children}</section>
   ),
-  SheetDescription: ({ children }: { children: ReactNode }) => (
+  DialogDescription: ({ children }: { children: ReactNode }) => (
     <p>{children}</p>
   ),
-  SheetHeader: ({ children }: { children: ReactNode }) => (
+  DialogHeader: ({ children }: { children: ReactNode }) => (
     <header>{children}</header>
   ),
-  SheetTitle: ({ children }: { children: ReactNode }) => <h1>{children}</h1>,
+  DialogTitle: ({ children }: { children: ReactNode }) => <h1>{children}</h1>,
 }))
 
 vi.mock("@workspace/ui/components/sidebar", () => ({
