@@ -11,6 +11,7 @@ import type {
   WikiIngestChangedEvent,
   WikiIngestJob,
   WikiFileTreeItem,
+  WikiSearchResult,
   WorkspaceSummary,
 } from "@workspace/contract"
 import { useState } from "react"
@@ -152,7 +153,29 @@ vi.mock("@workspace/ui/components/sheet", () => ({
   SheetTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
 }))
 
+vi.mock("@workspace/ui/components/dialog", () => ({
+  Dialog: ({ open, children }: { open: boolean; children: ReactNode }) =>
+    open ? <div>{children}</div> : null,
+  DialogContent: ({ children }: { children: ReactNode }) => (
+    <section>{children}</section>
+  ),
+  DialogDescription: ({ children }: { children: ReactNode }) => (
+    <p>{children}</p>
+  ),
+  DialogHeader: ({ children }: { children: ReactNode }) => (
+    <header>{children}</header>
+  ),
+  DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+}))
+
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn()
+  globalThis.ResizeObserver = class ResizeObserver {
+    constructor(_callback: ResizeObserverCallback) {}
+    observe(_target: Element) {}
+    unobserve(_target: Element) {}
+    disconnect() {}
+  }
   window.matchMedia = vi.fn().mockReturnValue({
     matches: false,
     addEventListener: vi.fn(),
@@ -321,6 +344,78 @@ describe("workspace app", () => {
     ).toBeNull()
   })
 
+  it("searches the wiki and opens the selected result", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi({
+      searchResults: [
+        {
+          kind: "page",
+          path: "concepts/checkpointing.md",
+          title: "Checkpointing",
+          pageType: "concept",
+          tags: ["storage"],
+          snippet: "A checkpoint records durable state.",
+          highlights: [],
+          score: 0.9,
+        },
+      ],
+    })
+    window.amend = api
+
+    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+
+    await user.click(await screen.findByRole("button", { name: /search wiki/i }))
+    await user.type(
+      await screen.findByPlaceholderText("Search this wiki..."),
+      "checkpointing"
+    )
+
+    await screen.findByText("Checkpointing")
+    expect(api.wiki.search).toHaveBeenCalledWith({
+      query: "checkpointing",
+      limit: 20,
+    })
+
+    await user.click(screen.getByText("Checkpointing"))
+    await screen.findByRole("heading", { name: "Checkpointing" })
+    expect(api.wiki.readFile).toHaveBeenCalledWith({
+      path: "concepts/checkpointing.md",
+    })
+  })
+
+  it("toggles wiki search with Ctrl+K", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+
+    await user.keyboard("{Control>}k{/Control}")
+    await screen.findByPlaceholderText("Search this wiki...")
+
+    await user.keyboard("{Control>}k{/Control}")
+    await waitFor(() =>
+      expect(screen.queryByPlaceholderText("Search this wiki...")).toBeNull()
+    )
+  })
+
+  it("finds text within the open file with Ctrl+F", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+
+    await screen.findByRole("heading", { name: "Reliability Wiki" })
+    await user.keyboard("{Control>}f{/Control}")
+    const findInput = await screen.findByPlaceholderText("Find in this file")
+    await user.type(findInput, "Welcome")
+    await screen.findByText("1/1")
+
+    await user.click(screen.getByRole("button", { name: "Close find in file" }))
+    expect(screen.queryByPlaceholderText("Find in this file")).toBeNull()
+  })
+
   it("keeps workspace running badges fresh from ingest events", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
@@ -443,7 +538,11 @@ type MockAmendApi = AmendApi & {
 
 function createDesktopApi({
   activeWorkspaceRunning = false,
-}: { activeWorkspaceRunning?: boolean } = {}): MockAmendApi {
+  searchResults = [],
+}: {
+  activeWorkspaceRunning?: boolean
+  searchResults?: readonly WikiSearchResult[]
+} = {}): MockAmendApi {
   const ingestListeners = new Set<(event: WikiIngestChangedEvent) => void>()
   const api: MockAmendApi = {
     runtime: "electron",
@@ -564,7 +663,7 @@ function createDesktopApi({
                 }
         return success(file)
       }),
-      search: vi.fn(async () => success([])),
+      search: vi.fn(async () => success(searchResults)),
       listTags: vi.fn(async () => success([])),
       onIngestChanged: vi.fn((listener) => {
         ingestListeners.add(listener)

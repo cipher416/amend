@@ -131,3 +131,12 @@
     @apply bg-background text-foreground;
   }
 }
+
+::highlight(workspace-file-search) {
+  background: color-mix(in oklch, var(--primary) 16%, transparent);
+}
+
+::highlight(workspace-file-search-current) {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}

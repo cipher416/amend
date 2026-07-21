@@ -134,7 +134,7 @@ export function WorkspaceAddDocument({
                 Add a source for Amend to connect with this workspace.
               </SheetDescription>
             </SheetHeader>
-            <FieldGroup className="gap-5 overflow-y-auto px-6 pb-6">
+            <FieldGroup className="scroll-fade gap-5 overflow-y-auto px-6 pb-6">
               <Field data-disabled={busy !== undefined || undefined}>
                 <FieldLabel htmlFor="source-document">Document</FieldLabel>
                 <Dropzone

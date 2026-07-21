@@ -43,6 +43,7 @@ import {
 import { Spinner } from "@workspace/ui/components/spinner"
 
 import { WorkspaceAddDocument } from "./workspace-add-document"
+import { WorkspaceSearch } from "./workspace-search"
 
 export function WorkspaceSidebar({
   desktop,
@@ -77,6 +78,7 @@ export function WorkspaceSidebar({
           opening={openingWorkspace}
           onOpenWorkspace={onOpenWorkspace}
         />
+        <WorkspaceSearch desktop={desktop} workspace={workspace} />
         <WorkspaceAddDocument
           key={workspace.id}
           desktop={desktop}

@@ -16,7 +16,7 @@ import {
 } from "@workspace/ui/components/sidebar"
 import { Spinner } from "@workspace/ui/components/spinner"
 import { TooltipProvider } from "@workspace/ui/components/tooltip"
-import { createContext, useContext } from "react"
+import { createContext, useContext, useRef } from "react"
 import type { ReactNode } from "react"
 
 import { errorMessage, useAmendApi } from "@/lib/amend-client"
@@ -25,6 +25,7 @@ import { readFile, workspaceFileKey } from "@/lib/workspace-queries"
 import { parseMarkdownDocument, WikiFileViewer } from "./wiki-file-viewer"
 import { WorkflowError } from "./wiki-workflow-ui"
 import { WorkspaceSession, useWorkspaceSession } from "./workspace-session"
+import { WorkspaceFileSearch } from "./workspace-file-search"
 import { WorkspaceSidebar } from "./workspace-sidebar"
 
 interface WorkspaceViewContextValue {
@@ -240,6 +241,7 @@ function WorkspaceMain({
   busy: WorkspaceBusy
   error?: string
 }) {
+  const contentRef = useRef<HTMLDivElement>(null)
   const document =
     selectedFile?.mediaType === "markdown"
       ? parseMarkdownDocument(selectedFile.content ?? "")
@@ -249,31 +251,36 @@ function WorkspaceMain({
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center gap-2 bg-background/80 px-4 backdrop-blur-md">
+      <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 bg-background/80 px-4 backdrop-blur-md">
         <SidebarTrigger className="mx-2" />
-        <p className="truncate font-heading text-sm font-medium">
+        <p className="min-w-0 flex-1 truncate font-heading text-sm font-medium">
           {headerTitle}
         </p>
+        <WorkspaceFileSearch contentRef={contentRef} file={selectedFile} />
       </header>
-      <main className="mx-auto w-full max-w-4xl px-8 py-8">
-        <WorkflowError message={error} />
-        {busy === "file" ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner />
-            <span>Opening file</span>
-          </div>
-        ) : selectedFile ? (
-          <WikiFileViewer
-            file={selectedFile}
-            document={document}
-            workspaceId={workspace.id}
-            files={files}
-          />
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Select a file from the sidebar.
-          </p>
-        )}
+      <main className="scroll-fade h-[calc(100svh-4rem)] w-full overflow-y-auto">
+        <div className="mx-auto w-full max-w-4xl px-8 py-8">
+          <WorkflowError message={error} />
+          {busy === "file" ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner />
+              <span>Opening file</span>
+            </div>
+          ) : selectedFile ? (
+            <div ref={contentRef}>
+              <WikiFileViewer
+                file={selectedFile}
+                document={document}
+                workspaceId={workspace.id}
+                files={files}
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Select a file from the sidebar.
+            </p>
+          )}
+        </div>
       </main>
     </>
   )

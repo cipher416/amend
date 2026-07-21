@@ -91,7 +91,7 @@ export function WikiFileViewer({
         ) : null}
         <Streamdown
           mode="static"
-          className="space-y-5 text-[0.9375rem] leading-7 text-foreground [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_h1]:mt-0 [&_h1]:text-3xl [&_h1]:font-medium [&_h1]:tracking-tight [&_h2]:mt-7 [&_h2]:text-2xl [&_h2]:font-medium [&_h2]:tracking-tight [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-medium [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_ul]:list-disc [&_ul]:pl-6"
+          className="space-y-5 text-[0.9375rem] leading-7 text-foreground [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_h1]:mt-0 [&_h1]:text-3xl [&_h1]:font-medium [&_h1]:tracking-tight [&_h2]:mt-7 [&_h2]:text-2xl [&_h2]:font-medium [&_h2]:tracking-tight [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-medium [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:scroll-fade-x [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_ul]:list-disc [&_ul]:pl-6"
           components={{ a: WorkspaceMarkdownLink }}
           rehypePlugins={[defaultRehypePlugins.sanitize]}
           urlTransform={(url) =>
@@ -112,7 +112,7 @@ export function WikiFileViewer({
       <div className="border-b px-5 py-3 font-mono text-[0.6875rem] text-muted-foreground">
         {file.path} · {file.size} bytes
       </div>
-      <div className="overflow-auto px-6 py-5 text-[0.9375rem] leading-7 whitespace-pre-wrap text-foreground">
+      <div className="scroll-fade-x overflow-x-auto px-6 py-5 text-[0.9375rem] leading-7 whitespace-pre-wrap text-foreground">
         {file.content}
       </div>
     </article>

@@ -5,6 +5,8 @@ import type {
   WikiFileContent,
   WikiFileTreeItem,
   WikiIngestJob,
+  WikiSearchInput,
+  WikiSearchResult,
   WorkspaceListItem,
   WorkspaceSummary,
 } from "@workspace/contract"
@@ -67,6 +69,13 @@ export async function readFile(
   path: string
 ): Promise<WikiFileContent> {
   return unwrapResult(await api.wiki.readFile({ path }))
+}
+
+export async function searchWiki(
+  api: AmendApi,
+  input: WikiSearchInput
+): Promise<readonly WikiSearchResult[]> {
+  return unwrapResult(await api.wiki.search(input))
 }
 
 export function unwrapResult<T>(response: AmendResult<T>): T {
