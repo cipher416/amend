@@ -41,7 +41,7 @@ server functions for Git, filesystem, database, credentials, or model access.
 
 Before the first wiki can be created, Amend needs a Pi model provider
 connected. If `~/.pi/agent/settings.json` does not already name a provider with
-stored credentials, onboarding shows a connect step instead of the workspace
+stored credentials, onboarding shows a connect step instead of the wiki
 form. From there, users can:
 
 - Sign in with Anthropic (Claude Pro/Max) or ChatGPT Plus/Pro (Codex) through a
@@ -68,19 +68,18 @@ Electron main process. Ingest runs as a main-process job, so renderer reloads
 reconnect to its latest status. Jobs live only for the current application
 session, and can be cancelled until Git commit promotion begins.
 
-## Workspace Lifecycle
+## Wiki Lifecycle
 
-On first use, Amend asks for one library home. Every workspace is a sibling Git
+On first use, Amend asks for one wiki home. Every wiki is a sibling Git
 repository directly under that directory; the home also contains a hidden
-`.amend` directory for Amend's library metadata. Each workspace has a stable ID
-stored in its own `.amend/workspace.json`.
+`.amend` directory for Amend metadata. Each wiki has a stable ID stored in its
+own `.amend/wiki.json` metadata file.
 
-The selected home and last active workspace ID live in Electron `userData`.
-Amend discovers workspaces by scanning the library home, then restores the last
-active workspace when it is still present. External repositories cannot be
-opened as workspaces.
+The selected home and last active wiki ID live in Electron `userData`. Amend
+discovers wikis by scanning the wiki home, then restores the last active wiki
+when it is still present. External repositories cannot be opened as wikis.
 
-The SQLite search index is a derived cache keyed by stable workspace ID. The app
-can switch between discovered sibling workspaces without cancelling an ingest in
-another workspace. Ingest updates are tagged with their originating workspace ID
-so the renderer only applies them to the matching active workspace.
+The SQLite search index is a derived cache keyed by stable wiki ID. The app can
+switch between discovered sibling wikis without cancelling an ingest in another
+wiki. Ingest updates are tagged with their originating wiki ID so the renderer
+only applies them to the matching active wiki.
