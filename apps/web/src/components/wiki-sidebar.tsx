@@ -268,7 +268,7 @@ function DirectoryTreeRow({
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger
           render={
-            <SidebarMenuButton className="[&[data-panel-open]>svg]:rotate-90" />
+            <SidebarMenuButton className="[&[data-panel-open]>svg:first-child]:rotate-90" />
           }
         >
           <HugeiconsIcon
