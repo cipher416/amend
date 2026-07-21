@@ -60,6 +60,7 @@ type ConnectAction =
       provider: string
       models: readonly PiModelSummary[]
     }
+  | { type: "models-loaded"; models: readonly PiModelSummary[] }
   | { type: "prompt-value-changed"; value: string }
   | { type: "prompt-submitted" }
   | { type: "model-selected"; model: string }
@@ -85,15 +86,41 @@ export function PiConnectStep({
   const [state, dispatch] = useReducer(connectReducer, initialState)
 
   useEffect(() => {
-    return api.pi.onLoginEvent((event) => {
+    return api.providers.onOAuthEvent((event) => {
       dispatch({ type: "login-event", event })
     })
   }, [api])
 
+  useEffect(() => {
+    const provider = state.provider
+    if (state.phase !== "model" || !provider || state.models !== undefined) {
+      return
+    }
+
+    let active = true
+    void api.providers
+      .listModels({ provider })
+      .then((response) => {
+        if (!active) return
+        if (!response.ok) {
+          dispatch({ type: "error", message: response.error.message })
+          return
+        }
+        dispatch({ type: "models-loaded", models: response.value })
+      })
+      .catch((cause: unknown) => {
+        if (active) dispatch({ type: "error", message: errorMessage(cause) })
+      })
+
+    return () => {
+      active = false
+    }
+  }, [api, state.models, state.phase, state.provider])
+
   async function startOAuth(provider: PiOAuthProviderId) {
     dispatch({ type: "busy-started" })
     try {
-      const response = await api.pi.startOAuthLogin({ provider })
+      const response = await api.providers.startOAuth({ provider })
       if (!response.ok) {
         dispatch({ type: "error", message: response.error.message })
         return
@@ -111,7 +138,7 @@ export function PiConnectStep({
   async function cancelOAuth() {
     if (!state.loginId) return
     try {
-      await api.pi.cancelLogin({ loginId: state.loginId })
+      await api.providers.cancelOAuth({ loginId: state.loginId })
     } catch {
       // The login may have already finished; nothing to reconcile here.
     }
@@ -121,7 +148,7 @@ export function PiConnectStep({
     if (!state.loginId || !state.prompt) return
     dispatch({ type: "busy-started" })
     try {
-      const response = await api.pi.respondToPrompt({
+      const response = await api.providers.respondToOAuthPrompt({
         loginId: state.loginId,
         promptId: state.prompt.promptId,
         value: state.promptValue,
@@ -139,7 +166,7 @@ export function PiConnectStep({
   async function switchToApiKey() {
     dispatch({ type: "busy-started" })
     try {
-      const response = await api.pi.listApiKeyProviders()
+      const response = await api.providers.list()
       if (!response.ok) {
         dispatch({ type: "error", message: response.error.message })
         return
@@ -155,7 +182,7 @@ export function PiConnectStep({
     if (!state.apiKeyProvider || !state.apiKeyValue.trim()) return
     dispatch({ type: "busy-started" })
     try {
-      const saveResponse = await api.pi.saveApiKeyCredential({
+      const saveResponse = await api.providers.connectWithApiKey({
         provider: state.apiKeyProvider,
         apiKey: state.apiKeyValue.trim(),
       })
@@ -163,7 +190,7 @@ export function PiConnectStep({
         dispatch({ type: "error", message: saveResponse.error.message })
         return
       }
-      const modelsResponse = await api.pi.listModels({
+      const modelsResponse = await api.providers.listModels({
         provider: state.apiKeyProvider,
       })
       if (!modelsResponse.ok) {
@@ -184,7 +211,7 @@ export function PiConnectStep({
     if (!state.provider || !state.selectedModel) return
     dispatch({ type: "busy-started" })
     try {
-      const response = await api.pi.setDefaultModel({
+      const response = await api.providers.setDefaultModel({
         provider: state.provider,
         model: state.selectedModel,
       })
@@ -215,227 +242,282 @@ export function PiConnectStep({
 
       <div className="mt-8 flex flex-col gap-6">
         {state.phase === "choose" ? (
-          <>
-            <FieldGroup className="gap-3">
-              {oauthProviders.map((provider) => (
-                <Button
-                  key={provider.id}
-                  type="button"
-                  variant="outline"
-                  size="lg"
-                  disabled={state.busy}
-                  onClick={() => void startOAuth(provider.id)}
-                  className="w-full justify-start"
-                >
-                  Connect {provider.name}
-                </Button>
-              ))}
-            </FieldGroup>
-            <Separator />
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={state.busy}
-              onClick={() => void switchToApiKey()}
-              className="w-fit"
-            >
-              {state.busy ? <Spinner data-icon="inline-start" /> : null}
-              Or connect with an API key
-            </Button>
-          </>
+          <ChooseProviderStep
+            busy={state.busy}
+            onStartOAuth={(provider) => void startOAuth(provider)}
+            onSwitchToApiKey={() => void switchToApiKey()}
+          />
         ) : null}
 
         {state.phase === "login" ? (
-          <div
-            className="flex flex-col gap-4 border-y py-5"
-            role="status"
-            aria-live="polite"
-          >
-            <div className="flex items-start gap-3">
-              <Spinner className="mt-0.5" />
-              <div>
-                <p className="text-sm font-medium">
-                  {state.statusMessage ?? "Connecting to your provider"}
-                </p>
-                {state.authInstructions ? (
-                  <p className="mt-1 text-xs/relaxed text-muted-foreground">
-                    {state.authInstructions}
-                  </p>
-                ) : null}
-                {state.authUrl ? (
-                  <p className="mt-1 text-xs/relaxed text-muted-foreground">
-                    If a browser window didn't open,{" "}
-                    <a
-                      href={state.authUrl}
-                      className="underline underline-offset-4"
-                    >
-                      open this link
-                    </a>{" "}
-                    to finish connecting.
-                  </p>
-                ) : null}
-              </div>
-            </div>
-
-            {state.prompt ? (
-              <Field>
-                <FieldLabel htmlFor="pi-login-prompt">
-                  {state.prompt.message}
-                </FieldLabel>
-                <Input
-                  id="pi-login-prompt"
-                  value={state.promptValue}
-                  placeholder={state.prompt.placeholder}
-                  onChange={(event) =>
-                    dispatch({
-                      type: "prompt-value-changed",
-                      value: event.target.value,
-                    })
-                  }
-                />
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={state.busy || !state.promptValue.trim()}
-                    onClick={() => void submitPrompt()}
-                  >
-                    Submit
-                  </Button>
-                </div>
-              </Field>
-            ) : null}
-
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void cancelOAuth()}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
+          <OAuthLoginStep
+            state={state}
+            onPromptChange={(value) =>
+              dispatch({ type: "prompt-value-changed", value })
+            }
+            onSubmitPrompt={() => void submitPrompt()}
+            onCancel={() => void cancelOAuth()}
+          />
         ) : null}
 
         {state.phase === "api-key" ? (
-          <form className="flex flex-col gap-4" onSubmit={saveApiKey}>
-            <Field>
-              <FieldLabel htmlFor="pi-api-key-provider">Provider</FieldLabel>
-              <select
-                id="pi-api-key-provider"
-                className="h-7 w-full rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-                value={state.apiKeyProvider ?? ""}
-                onChange={(event) =>
-                  dispatch({
-                    type: "api-key-provider-changed",
-                    provider: event.target.value,
-                  })
-                }
-                required
-              >
-                <option value="" disabled>
-                  Choose a provider
-                </option>
-                {state.apiKeyProviders?.map((provider) => (
-                  <option key={provider.id} value={provider.id}>
-                    {provider.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field>
-              <FieldLabel htmlFor="pi-api-key-value">API key</FieldLabel>
-              <Input
-                id="pi-api-key-value"
-                type="password"
-                value={state.apiKeyValue}
-                onChange={(event) =>
-                  dispatch({
-                    type: "api-key-value-changed",
-                    value: event.target.value,
-                  })
-                }
-                required
-              />
-              <FieldDescription>
-                Stored locally and used only to reach this provider's API.
-              </FieldDescription>
-            </Field>
-
-            <div className="flex justify-between">
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={state.busy}
-                onClick={() => dispatch({ type: "back-to-choose" })}
-              >
-                Back
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  state.busy ||
-                  !state.apiKeyProvider ||
-                  !state.apiKeyValue.trim()
-                }
-              >
-                {state.busy ? <Spinner data-icon="inline-start" /> : null}
-                Save and continue
-              </Button>
-            </div>
-          </form>
+          <ApiKeyStep
+            state={state}
+            onSubmit={saveApiKey}
+            onProviderChange={(provider) =>
+              dispatch({ type: "api-key-provider-changed", provider })
+            }
+            onApiKeyChange={(value) =>
+              dispatch({ type: "api-key-value-changed", value })
+            }
+            onBack={() => dispatch({ type: "back-to-choose" })}
+          />
         ) : null}
 
         {state.phase === "model" ? (
-          <div className="flex flex-col gap-4">
-            <Field>
-              <FieldLabel htmlFor="pi-default-model">Default model</FieldLabel>
-              <select
-                id="pi-default-model"
-                className="h-7 w-full rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-                value={state.selectedModel ?? ""}
-                onChange={(event) =>
-                  dispatch({
-                    type: "model-selected",
-                    model: event.target.value,
-                  })
-                }
-                required
-              >
-                <option value="" disabled>
-                  Choose a model
-                </option>
-                {state.models?.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name}
-                  </option>
-                ))}
-              </select>
-              <FieldDescription>
-                Used to read documents and write the wiki. You can change this
-                later.
-              </FieldDescription>
-            </Field>
-
-            <div className="flex justify-end border-t pt-4">
-              <Button
-                type="button"
-                size="lg"
-                disabled={state.busy || !state.selectedModel}
-                onClick={() => void confirmDefaultModel()}
-              >
-                {state.busy ? <Spinner data-icon="inline-start" /> : null}
-                Continue
-              </Button>
-            </div>
-          </div>
+          <ModelStep
+            state={state}
+            onModelSelect={(model) => dispatch({ type: "model-selected", model })}
+            onConfirm={() => void confirmDefaultModel()}
+          />
         ) : null}
 
         <WorkflowError message={state.error} />
       </div>
     </section>
+  )
+}
+
+function ChooseProviderStep({
+  busy,
+  onStartOAuth,
+  onSwitchToApiKey,
+}: {
+  busy: boolean
+  onStartOAuth: (provider: PiOAuthProviderId) => void
+  onSwitchToApiKey: () => void
+}) {
+  return (
+    <>
+      <FieldGroup className="gap-3">
+        {oauthProviders.map((provider) => (
+          <Button
+            key={provider.id}
+            type="button"
+            variant="outline"
+            size="lg"
+            disabled={busy}
+            onClick={() => onStartOAuth(provider.id)}
+            className="w-full justify-start"
+          >
+            Connect {provider.name}
+          </Button>
+        ))}
+      </FieldGroup>
+      <Separator />
+      <Button
+        type="button"
+        variant="ghost"
+        disabled={busy}
+        onClick={onSwitchToApiKey}
+        className="w-fit"
+      >
+        {busy ? <Spinner data-icon="inline-start" /> : null}
+        Or connect with an API key
+      </Button>
+    </>
+  )
+}
+
+function OAuthLoginStep({
+  state,
+  onPromptChange,
+  onSubmitPrompt,
+  onCancel,
+}: {
+  state: ConnectState
+  onPromptChange: (value: string) => void
+  onSubmitPrompt: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div
+      className="flex flex-col gap-4 border-y py-5"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex items-start gap-3">
+        <Spinner className="mt-0.5" />
+        <div>
+          <p className="text-sm font-medium">
+            {state.statusMessage ?? "Connecting to your provider"}
+          </p>
+          {state.authInstructions ? (
+            <p className="mt-1 text-xs/relaxed text-muted-foreground">
+              {state.authInstructions}
+            </p>
+          ) : null}
+          {state.authUrl ? (
+            <p className="mt-1 text-xs/relaxed text-muted-foreground">
+              If a browser window didn't open,{" "}
+              <a href={state.authUrl} className="underline underline-offset-4">
+                open this link
+              </a>{" "}
+              to finish connecting.
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      {state.prompt ? (
+        <Field>
+          <FieldLabel htmlFor="pi-login-prompt">
+            {state.prompt.message}
+          </FieldLabel>
+          <Input
+            id="pi-login-prompt"
+            value={state.promptValue}
+            placeholder={state.prompt.placeholder}
+            onChange={(event) => onPromptChange(event.target.value)}
+          />
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              disabled={state.busy || !state.promptValue.trim()}
+              onClick={onSubmitPrompt}
+            >
+              Submit
+            </Button>
+          </div>
+        </Field>
+      ) : null}
+
+      <div className="flex justify-end">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function ApiKeyStep({
+  state,
+  onSubmit,
+  onProviderChange,
+  onApiKeyChange,
+  onBack,
+}: {
+  state: ConnectState
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
+  onProviderChange: (provider: string) => void
+  onApiKeyChange: (value: string) => void
+  onBack: () => void
+}) {
+  return (
+    <form className="flex flex-col gap-4" onSubmit={onSubmit}>
+      <Field>
+        <FieldLabel htmlFor="pi-api-key-provider">Provider</FieldLabel>
+        <select
+          id="pi-api-key-provider"
+          aria-label="Provider"
+          className="h-7 w-full rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          value={state.apiKeyProvider ?? ""}
+          onChange={(event) => onProviderChange(event.target.value)}
+          required
+        >
+          <option value="" disabled>
+            Choose a provider
+          </option>
+          {state.apiKeyProviders?.map((provider) => (
+            <option key={provider.id} value={provider.id}>
+              {provider.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field>
+        <FieldLabel htmlFor="pi-api-key-value">API key</FieldLabel>
+        <Input
+          id="pi-api-key-value"
+          type="password"
+          value={state.apiKeyValue}
+          onChange={(event) => onApiKeyChange(event.target.value)}
+          required
+        />
+        <FieldDescription>
+          Stored locally and used only to reach this provider's API.
+        </FieldDescription>
+      </Field>
+
+      <div className="flex justify-between">
+        <Button type="button" variant="ghost" disabled={state.busy} onClick={onBack}>
+          Back
+        </Button>
+        <Button
+          type="submit"
+          disabled={
+            state.busy || !state.apiKeyProvider || !state.apiKeyValue.trim()
+          }
+        >
+          {state.busy ? <Spinner data-icon="inline-start" /> : null}
+          Save and continue
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function ModelStep({
+  state,
+  onModelSelect,
+  onConfirm,
+}: {
+  state: ConnectState
+  onModelSelect: (model: string) => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <Field>
+        <FieldLabel htmlFor="pi-default-model">Default model</FieldLabel>
+        <select
+          id="pi-default-model"
+          aria-label="Default model"
+          className="h-7 w-full rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          value={state.selectedModel ?? ""}
+          disabled={state.busy}
+          onChange={(event) => onModelSelect(event.target.value)}
+          required
+        >
+          <option value="" disabled>
+            Choose a model
+          </option>
+          {state.models?.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.name}
+            </option>
+          ))}
+        </select>
+        <FieldDescription>
+          Used to read documents and write the wiki. You can change this later.
+        </FieldDescription>
+      </Field>
+
+      <div className="flex justify-end border-t pt-4">
+        <Button
+          type="button"
+          size="lg"
+          disabled={state.busy || !state.selectedModel}
+          onClick={onConfirm}
+        >
+          {state.busy ? <Spinner data-icon="inline-start" /> : null}
+          Continue
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -486,7 +568,7 @@ function connectReducer(
           return {
             ...state,
             phase: "model",
-            busy: false,
+            busy: true,
             prompt: undefined,
             models: undefined,
             selectedModel: undefined,
@@ -531,6 +613,12 @@ function connectReducer(
         provider: action.provider,
         models: action.models,
         selectedModel: undefined,
+      }
+    case "models-loaded":
+      return {
+        ...state,
+        busy: false,
+        models: action.models,
       }
     case "prompt-value-changed":
       return { ...state, promptValue: action.value }

@@ -21,7 +21,7 @@ export function WikiReadyStep({
   onRetryIndex,
 }: {
   workspace?: WorkspaceSummary
-  ingest: IngestPastedSourceResult
+  ingest?: IngestPastedSourceResult
   refreshing: boolean
   error?: string
   onRetryIndex: () => void
@@ -36,7 +36,7 @@ export function WikiReadyStep({
           Wiki ready
         </h1>
         <p className="mt-2 text-sm/relaxed text-muted-foreground">
-          {ingest.summary}
+          {ingest?.summary ?? "Your existing wiki is ready to browse."}
         </p>
       </header>
 
@@ -48,19 +48,26 @@ export function WikiReadyStep({
           </div>
           <div className="flex flex-col gap-1">
             <dt className="text-muted-foreground">Commit</dt>
-            <dd className="font-mono">{ingest.commitHash.slice(0, 12)}</dd>
+            <dd className="font-mono">
+              {(ingest?.commitHash ?? workspace?.commitHash ?? "unknown").slice(
+                0,
+                12
+              )}
+            </dd>
           </div>
         </dl>
 
-        <div className="flex flex-wrap gap-1">
-          {ingest.changedFiles.map((path) => (
-            <Badge key={path} variant="secondary">
-              {path}
-            </Badge>
-          ))}
-        </div>
+        {ingest?.changedFiles.length ? (
+          <div className="flex flex-wrap gap-1">
+            {ingest.changedFiles.map((path) => (
+              <Badge key={path} variant="secondary">
+                {path}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
 
-        {ingest.index.status === "failed" ? (
+        {ingest?.index.status === "failed" ? (
           <Alert variant="destructive">
             <AlertTitle>Search index unavailable</AlertTitle>
             <AlertDescription>{ingest.index.error.message}</AlertDescription>
@@ -70,7 +77,7 @@ export function WikiReadyStep({
         <WorkflowError message={error} />
       </div>
 
-      {ingest.index.status === "failed" ? (
+      {ingest?.index.status === "failed" ? (
         <div className="mt-6 flex justify-end">
           <Button
             type="button"

@@ -1,15 +1,32 @@
 import { useEffect, useReducer } from "react"
+import { useQuery } from "@tanstack/react-query"
+import type { QueryClient } from "@tanstack/react-query"
+import { useRouter } from "@tanstack/react-router"
+import type { ReactNode } from "react"
 import type {
   AmendApi,
   IngestPastedSourceResult,
   SourceDocumentSelection,
+  WikiIngestChangedEvent,
   WikiIngestJob,
+  WorkspaceListItem,
   WorkspaceParentSelection,
   WorkspaceSummary,
 } from "@workspace/contract"
+import { Button } from "@workspace/ui/components/button"
 import { Spinner } from "@workspace/ui/components/spinner"
 
-import { errorMessage, getAmendApi } from "@/lib/amend-client"
+import { errorMessage, useAmendApi } from "@/lib/amend-client"
+import {
+  listWorkspaces,
+  providerStatusKey,
+  readCurrentIngest,
+  readCurrentWorkspace,
+  readProviderStatus,
+  workspaceCurrentKey,
+  workspaceIngestKey,
+  workspacesKey,
+} from "@/lib/workspace-queries"
 
 import { PiConnectStep } from "./pi-connect-step"
 import { WikiReadyStep } from "./wiki-ready-step"
@@ -17,11 +34,16 @@ import { WikiSetupStep } from "./wiki-setup-step"
 import { WorkflowShell } from "./wiki-workflow-ui"
 
 type BusyOperation =
-  "location" | "document" | "create" | "ingest" | "index" | null
+  | "location"
+  | "open"
+  | "switch"
+  | "document"
+  | "create"
+  | "ingest"
+  | "index"
+  | null
 
 interface WorkflowState {
-  desktop: AmendApi | null | undefined
-  recovered: boolean
   piConfigured?: boolean
   busy: BusyOperation
   error?: string
@@ -37,14 +59,47 @@ interface WorkflowState {
 
 type EditableField = "wikiName" | "domain" | "objective"
 
+interface WorkflowStepViewProps {
+  api: AmendApi
+  state: WorkflowState
+  piConfigured: boolean
+  workspace?: WorkspaceSummary
+  knownWorkspaces: readonly WorkspaceListItem[]
+  job?: WikiIngestJob
+  error?: string
+  onActivateWorkspace: (workspaceId: string) => void
+  onOpenWorkspace: () => void
+  onProviderConnected: () => void
+  onRetryIndex: () => void
+  onFieldChange: (field: EditableField, value: string) => void
+  onChooseLocation: () => void
+  onRegisterDocument: (file: File) => void
+  onDocumentError: (message: string) => void
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
+  onCancel: () => void
+}
+
+interface WorkflowActions {
+  chooseLocation: () => Promise<void>
+  openWorkspace: () => Promise<void>
+  registerDocument: (file: File) => Promise<void>
+  createWiki: (event: React.FormEvent<HTMLFormElement>) => Promise<void>
+  activateWorkspace: (workspaceId: string) => Promise<void>
+  cancelIngest: () => Promise<void>
+  retryIndex: () => Promise<void>
+  changeField: (field: EditableField, value: string) => void
+}
+
+interface WorkflowActionsInput {
+  api: AmendApi
+  state: WorkflowState
+  workspace?: WorkspaceSummary
+  job?: WikiIngestJob
+  queryClient: QueryClient
+  dispatch: React.Dispatch<WorkflowAction>
+}
+
 type WorkflowAction =
-  | { type: "desktop-loaded"; desktop: AmendApi | null }
-  | {
-      type: "session-recovered"
-      piConfigured: boolean
-      workspace: WorkspaceSummary | null
-      job: WikiIngestJob | null
-    }
   | { type: "pi-connected" }
   | { type: "field-changed"; field: EditableField; value: string }
   | { type: "operation-started"; operation: Exclude<BusyOperation, null> }
@@ -57,244 +112,423 @@ type WorkflowAction =
       sourceFiles: File[]
     }
   | { type: "workspace-created"; workspace: WorkspaceSummary }
+  | { type: "workspace-opened"; workspace: WorkspaceSummary }
+  | {
+      type: "workspace-activated"
+      workspace: WorkspaceSummary
+      job: WikiIngestJob | null
+    }
   | { type: "ingest-started" }
-  | { type: "ingest-changed"; job: WikiIngestJob }
+  | { type: "ingest-changed"; event: WikiIngestChangedEvent }
   | { type: "index-refreshed"; index: IngestPastedSourceResult["index"] }
 
 const initialWorkflowState: WorkflowState = {
-  desktop: undefined,
-  recovered: false,
   busy: null,
   wikiName: "",
   domain: "",
   objective: "",
 }
 
-export function WikiWorkflow() {
+export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
+  const queryClient = useRouter().options.context.queryClient
   const [state, dispatch] = useReducer(workflowReducer, initialWorkflowState)
-  const { desktop } = state
+  const desktop = useAmendApi()
 
-  useEffect(() => {
-    dispatch({ type: "desktop-loaded", desktop: getAmendApi() })
-  }, [])
+  const providerStatus = useQuery(
+    {
+      queryKey: providerStatusKey,
+      queryFn: () => readProviderStatus(requireDesktop(desktop)),
+      enabled: Boolean(desktop),
+    },
+    queryClient
+  )
+  const currentWorkspace = useQuery(
+    {
+      queryKey: workspaceCurrentKey,
+      queryFn: () => readCurrentWorkspace(requireDesktop(desktop)),
+      enabled: Boolean(desktop),
+    },
+    queryClient
+  )
+  const workspaces = useQuery(
+    {
+      queryKey: workspacesKey,
+      queryFn: () => listWorkspaces(requireDesktop(desktop)),
+      enabled: Boolean(desktop),
+    },
+    queryClient
+  )
+  const currentWorkspaceId = currentWorkspace.data?.id
+  const currentIngest = useQuery(
+    {
+      queryKey: currentWorkspaceId
+        ? workspaceIngestKey(currentWorkspaceId)
+        : ["workspace", "ingest", "disabled"],
+      queryFn: () => readCurrentIngest(requireDesktop(desktop)),
+      enabled: Boolean(desktop && currentWorkspaceId),
+    },
+    queryClient
+  )
+
+  const queriedWorkspace = currentWorkspace.data ?? undefined
+  const queriedJob = currentIngest.data ?? undefined
+  const workspace = state.workspace ?? queriedWorkspace
+  const job =
+    queriedJob && !isOlderJob(queriedJob, state.job)
+      ? queriedJob
+      : state.job
+  const piConfigured =
+    state.piConfigured ?? providerStatus.data?.configured ?? false
+  const knownWorkspaces = workspaces.data ?? []
+  const activeWorkspaceId = workspace?.id
 
   useEffect(() => {
     if (!desktop) return
-    const unsubscribe = desktop.wiki.onIngestChanged((job) => {
-      dispatch({ type: "ingest-changed", job })
+    const unsubscribe = desktop.wiki.onIngestChanged((event) => {
+      queryClient.setQueryData<readonly WorkspaceListItem[]>(
+        workspacesKey,
+        (items) =>
+          items?.map((item) =>
+            item.id === event.workspaceId
+              ? { ...item, running: event.job.status === "running" }
+              : item
+          )
+      )
+      if (event.workspaceId === activeWorkspaceId) {
+        queryClient.setQueryData(workspaceIngestKey(activeWorkspaceId), event.job)
+        if (event.job.status === "completed" && event.job.result) {
+          queryClient.setQueryData<WorkspaceSummary | null>(
+            workspaceCurrentKey,
+            (current) =>
+              current
+                ? {
+                    ...current,
+                    commitHash: event.job.result?.commitHash ?? current.commitHash,
+                    setupStatus: "ready",
+                  }
+                : current
+          )
+        }
+        dispatch({ type: "ingest-changed", event })
+      }
     })
-    void recoverSession(desktop, dispatch)
     return unsubscribe
-  }, [desktop])
+  }, [activeWorkspaceId, desktop, queryClient])
 
-  if (desktop === undefined || (desktop !== null && !state.recovered)) {
+  const recovering = Boolean(
+    desktop &&
+      (providerStatus.isPending ||
+        currentWorkspace.isPending ||
+        workspaces.isPending ||
+        (Boolean(currentWorkspaceId) && currentIngest.isPending))
+  )
+  if (desktop === undefined || recovering) {
     return <OpeningScreen />
   }
   if (desktop === null) return <DesktopRequired />
+  if (piConfigured && workspace?.setupStatus === "ready" && readyElement) {
+    return readyElement
+  }
 
   const api = desktop
+  const sessionError =
+    queryErrorMessage(providerStatus.error) ??
+    queryErrorMessage(currentWorkspace.error) ??
+    queryErrorMessage(workspaces.error) ??
+    queryErrorMessage(currentIngest.error)
+  const error = state.error ?? sessionError
+  const actions = useWikiWorkflowActions({
+    api,
+    state,
+    workspace,
+    job,
+    queryClient,
+    dispatch,
+  })
 
-  async function chooseLocation() {
-    dispatch({ type: "operation-started", operation: "location" })
-    try {
-      const response = await api.workspace.chooseParent()
-      if (!response.ok) {
-        dispatch({ type: "operation-failed", message: response.error.message })
-      } else if (response.value) {
-        dispatch({ type: "location-selected", selection: response.value })
-      } else {
-        dispatch({ type: "operation-finished" })
+  return (
+    <WorkflowStepView
+      api={api}
+      state={state}
+      piConfigured={piConfigured}
+      workspace={workspace}
+      knownWorkspaces={knownWorkspaces}
+      job={job}
+      error={error}
+      onActivateWorkspace={(workspaceId) => void actions.activateWorkspace(workspaceId)}
+      onOpenWorkspace={() => void actions.openWorkspace()}
+      onProviderConnected={() => {
+        queryClient.setQueryData(providerStatusKey, { configured: true })
+        dispatch({ type: "pi-connected" })
+      }}
+      onRetryIndex={() => void actions.retryIndex()}
+      onFieldChange={actions.changeField}
+      onChooseLocation={() => void actions.chooseLocation()}
+      onRegisterDocument={(file) => void actions.registerDocument(file)}
+      onDocumentError={(message) => dispatch({ type: "operation-failed", message })}
+      onSubmit={(event) => void actions.createWiki(event)}
+      onCancel={() => void actions.cancelIngest()}
+    />
+  )
+}
+
+function useWikiWorkflowActions({
+  api,
+  state,
+  workspace,
+  job,
+  queryClient,
+  dispatch,
+}: WorkflowActionsInput): WorkflowActions {
+  return {
+    chooseLocation: async () => {
+      dispatch({ type: "operation-started", operation: "location" })
+      try {
+        const response = await api.workspaces.chooseLocation()
+        if (!response.ok) {
+          dispatch({ type: "operation-failed", message: response.error.message })
+        } else if (response.value) {
+          dispatch({ type: "location-selected", selection: response.value })
+        } else {
+          dispatch({ type: "operation-finished" })
+        }
+      } catch (cause) {
+        dispatch({ type: "operation-failed", message: errorMessage(cause) })
       }
-    } catch (cause) {
-      dispatch({ type: "operation-failed", message: errorMessage(cause) })
-    }
-  }
-
-  async function registerDocument(file: File) {
-    dispatch({ type: "operation-started", operation: "document" })
-    try {
-      const response = await api.wiki.registerDocument(file)
-      if (!response.ok) {
-        dispatch({ type: "operation-failed", message: response.error.message })
-      } else {
-        dispatch({
-          type: "document-selected",
-          document: response.value,
-          sourceFiles: [file],
-        })
+    },
+    openWorkspace: async () => {
+      dispatch({ type: "operation-started", operation: "open" })
+      try {
+        const response = await api.workspaces.open()
+        if (!response.ok) {
+          dispatch({ type: "operation-failed", message: response.error.message })
+        } else if (response.value) {
+          queryClient.setQueryData(workspaceCurrentKey, response.value)
+          void queryClient.invalidateQueries({ queryKey: workspacesKey })
+          dispatch({ type: "workspace-opened", workspace: response.value })
+        } else {
+          dispatch({ type: "operation-finished" })
+        }
+      } catch (cause) {
+        dispatch({ type: "operation-failed", message: errorMessage(cause) })
       }
-    } catch (cause) {
-      dispatch({ type: "operation-failed", message: errorMessage(cause) })
-    }
-  }
-
-  async function createWiki(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!state.document) {
-      dispatch({
-        type: "operation-failed",
-        message: "Choose the first source document.",
-      })
-      return
-    }
-
-    let workspace = state.workspace
-    if (!workspace) {
-      if (!state.selection) {
+    },
+    registerDocument: async (file) => {
+      dispatch({ type: "operation-started", operation: "document" })
+      try {
+        const response = await api.wiki.registerDocument(file)
+        if (!response.ok) {
+          dispatch({ type: "operation-failed", message: response.error.message })
+        } else {
+          dispatch({
+            type: "document-selected",
+            document: response.value,
+            sourceFiles: [file],
+          })
+        }
+      } catch (cause) {
+        dispatch({ type: "operation-failed", message: errorMessage(cause) })
+      }
+    },
+    createWiki: async (event) => {
+      event.preventDefault()
+      if (!state.document) {
         dispatch({
           type: "operation-failed",
-          message: "Choose where Amend should create the wiki.",
+          message: "Choose the first source document.",
         })
         return
       }
-      dispatch({ type: "operation-started", operation: "create" })
-      try {
-        const response = await api.workspace.create({
-          selectionToken: state.selection.token,
-          name: state.wikiName,
-          domain: state.domain,
-        })
-        if (!response.ok) {
+
+      let targetWorkspace = workspace
+      if (!targetWorkspace) {
+        if (!state.selection) {
           dispatch({
             type: "operation-failed",
-            message: response.error.message,
+            message: "Choose where Amend should create the wiki.",
           })
           return
         }
-        workspace = response.value
-        dispatch({ type: "workspace-created", workspace })
+        dispatch({ type: "operation-started", operation: "create" })
+        try {
+          const response = await api.workspaces.create({
+            selectionToken: state.selection.token,
+            name: state.wikiName,
+            domain: state.domain,
+          })
+          if (!response.ok) {
+            dispatch({ type: "operation-failed", message: response.error.message })
+            return
+          }
+          targetWorkspace = response.value
+          queryClient.setQueryData(workspaceCurrentKey, targetWorkspace)
+          void queryClient.invalidateQueries({ queryKey: workspacesKey })
+          dispatch({ type: "workspace-created", workspace: targetWorkspace })
+        } catch (cause) {
+          dispatch({ type: "operation-failed", message: errorMessage(cause) })
+          return
+        }
+      }
+
+      dispatch({ type: "operation-started", operation: "ingest" })
+      try {
+        const response = await api.wiki.startIngest({
+          documentToken: state.document.token,
+          objective: state.objective,
+        })
+        if (!response.ok) {
+          dispatch({ type: "operation-failed", message: response.error.message })
+          return
+        }
+        dispatch({ type: "ingest-started" })
+        const snapshot = await api.wiki.currentIngest()
+        if (snapshot.ok && snapshot.value?.id === response.value.jobId) {
+          queryClient.setQueryData(
+            workspaceIngestKey(targetWorkspace.id),
+            snapshot.value
+          )
+          dispatch({
+            type: "ingest-changed",
+            event: { workspaceId: targetWorkspace.id, job: snapshot.value },
+          })
+        }
       } catch (cause) {
         dispatch({ type: "operation-failed", message: errorMessage(cause) })
-        return
       }
-    }
-
-    dispatch({ type: "operation-started", operation: "ingest" })
-    try {
-      const response = await api.wiki.startIngest({
-        documentToken: state.document.token,
-        objective: state.objective,
-      })
-      if (!response.ok) {
-        dispatch({ type: "operation-failed", message: response.error.message })
-        return
+    },
+    activateWorkspace: async (workspaceId) => {
+      if (workspaceId === workspace?.id) return
+      dispatch({ type: "operation-started", operation: "switch" })
+      try {
+        const response = await api.workspaces.activate({ workspaceId })
+        if (!response.ok) {
+          dispatch({ type: "operation-failed", message: response.error.message })
+          return
+        }
+        queryClient.setQueryData(workspaceCurrentKey, response.value)
+        void queryClient.invalidateQueries({ queryKey: workspacesKey })
+        const ingest = await api.wiki.currentIngest()
+        queryClient.setQueryData(
+          workspaceIngestKey(response.value.id),
+          ingest.ok ? ingest.value : null
+        )
+        dispatch({
+          type: "workspace-activated",
+          workspace: response.value,
+          job: ingest.ok ? ingest.value : null,
+        })
+      } catch (cause) {
+        dispatch({ type: "operation-failed", message: errorMessage(cause) })
       }
-      dispatch({ type: "ingest-started" })
-      const snapshot = await api.wiki.currentIngest()
-      if (snapshot.ok && snapshot.value?.id === response.value.jobId) {
-        dispatch({ type: "ingest-changed", job: snapshot.value })
+    },
+    cancelIngest: async () => {
+      if (!job?.cancellable) return
+      try {
+        const response = await api.wiki.cancelIngest({ jobId: job.id })
+        if (!response.ok) {
+          dispatch({ type: "operation-failed", message: response.error.message })
+        }
+      } catch (cause) {
+        dispatch({ type: "operation-failed", message: errorMessage(cause) })
       }
-    } catch (cause) {
-      dispatch({ type: "operation-failed", message: errorMessage(cause) })
-    }
+    },
+    retryIndex: async () => {
+      dispatch({ type: "operation-started", operation: "index" })
+      try {
+        const response = await api.wiki.refreshIndex()
+        if (!response.ok) {
+          dispatch({ type: "operation-failed", message: response.error.message })
+          return
+        }
+        dispatch({
+          type: "index-refreshed",
+          index: { status: "ready", summary: response.value },
+        })
+      } catch (cause) {
+        dispatch({ type: "operation-failed", message: errorMessage(cause) })
+      }
+    },
+    changeField: (field, value) => {
+      dispatch({ type: "field-changed", field, value })
+    },
   }
+}
 
-  async function cancelIngest() {
-    if (!state.job?.cancellable) return
-    try {
-      const response = await api.wiki.cancelIngest({ jobId: state.job.id })
-      if (!response.ok) {
-        dispatch({ type: "operation-failed", message: response.error.message })
-      }
-    } catch (cause) {
-      dispatch({ type: "operation-failed", message: errorMessage(cause) })
-    }
-  }
-
-  async function retryIndex() {
-    dispatch({ type: "operation-started", operation: "index" })
-    try {
-      const response = await api.wiki.refreshIndex()
-      if (!response.ok) {
-        dispatch({ type: "operation-failed", message: response.error.message })
-        return
-      }
-      dispatch({
-        type: "index-refreshed",
-        index: { status: "ready", summary: response.value },
-      })
-    } catch (cause) {
-      dispatch({ type: "operation-failed", message: errorMessage(cause) })
-    }
-  }
-
-  function changeField(field: EditableField, value: string) {
-    dispatch({ type: "field-changed", field, value })
-  }
-
+function WorkflowStepView({
+  api,
+  state,
+  piConfigured,
+  workspace,
+  knownWorkspaces,
+  job,
+  error,
+  onActivateWorkspace,
+  onOpenWorkspace,
+  onProviderConnected,
+  onRetryIndex,
+  onFieldChange,
+  onChooseLocation,
+  onRegisterDocument,
+  onDocumentError,
+  onSubmit,
+  onCancel,
+}: WorkflowStepViewProps) {
   return (
     <WorkflowShell>
-      {!state.piConfigured ? (
-        <PiConnectStep
-          api={api}
-          onConnected={() => dispatch({ type: "pi-connected" })}
+      {knownWorkspaces.length ? (
+        <WorkspaceSwitcher
+          workspaces={knownWorkspaces}
+          activeWorkspaceId={workspace?.id}
+          busy={state.busy === "switch" || state.busy === "open"}
+          onActivate={onActivateWorkspace}
+          onOpen={onOpenWorkspace}
         />
-      ) : state.job?.status === "completed" && state.job.result ? (
+      ) : null}
+      {!piConfigured ? (
+        <PiConnectStep api={api} onConnected={onProviderConnected} />
+      ) : workspace?.setupStatus === "ready" &&
+        (!job || (job.status === "completed" && job.result)) ? (
         <WikiReadyStep
-          workspace={state.workspace}
-          ingest={state.job.result}
+          workspace={workspace}
+          ingest={job?.result}
           refreshing={state.busy === "index"}
-          error={state.error}
-          onRetryIndex={() => void retryIndex()}
+          error={error}
+          onRetryIndex={onRetryIndex}
         />
       ) : (
         <WikiSetupStep
-          workspace={state.workspace}
+          workspace={workspace}
           wikiName={state.wikiName}
           domain={state.domain}
           location={state.selection?.displayPath}
           document={state.document}
           sourceFiles={state.sourceFiles}
           objective={state.objective}
-          job={state.job}
+          job={job}
           busy={state.busy !== null}
+          opening={state.busy === "open"}
           submitting={state.busy === "create" || state.busy === "ingest"}
-          error={state.error}
-          onFieldChange={changeField}
-          onChooseLocation={() => void chooseLocation()}
-          onRegisterDocument={(file) => void registerDocument(file)}
-          onDocumentError={(message) =>
-            dispatch({ type: "operation-failed", message })
-          }
-          onSubmit={createWiki}
-          onCancel={() => void cancelIngest()}
+          error={error}
+          onFieldChange={onFieldChange}
+          onChooseLocation={onChooseLocation}
+          onOpenWorkspace={onOpenWorkspace}
+          onRegisterDocument={onRegisterDocument}
+          onDocumentError={onDocumentError}
+          onSubmit={onSubmit}
+          onCancel={onCancel}
         />
       )}
     </WorkflowShell>
   )
 }
 
-async function recoverSession(
-  api: AmendApi,
-  dispatch: React.Dispatch<WorkflowAction>
-): Promise<void> {
-  try {
-    const [status, workspace, job] = await Promise.all([
-      api.pi.status(),
-      api.workspace.current(),
-      api.wiki.currentIngest(),
-    ])
-    if (!workspace.ok) {
-      dispatch({ type: "operation-failed", message: workspace.error.message })
-    }
-    if (!job.ok) {
-      dispatch({ type: "operation-failed", message: job.error.message })
-    }
-    dispatch({
-      type: "session-recovered",
-      piConfigured: status.ok && status.value.configured,
-      workspace: workspace.ok ? workspace.value : null,
-      job: job.ok ? job.value : null,
-    })
-  } catch (cause) {
-    dispatch({ type: "operation-failed", message: errorMessage(cause) })
-    dispatch({
-      type: "session-recovered",
-      piConfigured: false,
-      workspace: null,
-      job: null,
-    })
-  }
+function requireDesktop(desktop: AmendApi | null | undefined): AmendApi {
+  if (!desktop) throw new Error("Amend desktop API is unavailable")
+  return desktop
+}
+
+function queryErrorMessage(error: Error | null): string | undefined {
+  return error ? errorMessage(error) : undefined
 }
 
 function workflowReducer(
@@ -302,27 +536,6 @@ function workflowReducer(
   action: WorkflowAction
 ): WorkflowState {
   switch (action.type) {
-    case "desktop-loaded":
-      return {
-        ...state,
-        desktop: action.desktop,
-        recovered: action.desktop === null,
-      }
-    case "session-recovered": {
-      const recoveredJob =
-        action.job && !isOlderJob(action.job, state.job)
-          ? action.job
-          : state.job
-      return applyJob(
-        {
-          ...state,
-          recovered: true,
-          piConfigured: action.piConfigured,
-          workspace: action.workspace ?? undefined,
-        },
-        recoveredJob
-      )
-    }
     case "pi-connected":
       return { ...state, piConfigured: true }
     case "field-changed":
@@ -345,12 +558,28 @@ function workflowReducer(
         error: undefined,
       }
     case "workspace-created":
+    case "workspace-opened":
       return {
         ...state,
         workspace: action.workspace,
+        job: undefined,
+        document: undefined,
+        sourceFiles: undefined,
         busy: null,
         error: undefined,
       }
+    case "workspace-activated":
+      return applyJob(
+        {
+          ...state,
+          workspace: action.workspace,
+          document: undefined,
+          sourceFiles: undefined,
+          busy: null,
+          error: undefined,
+        },
+        action.job ?? undefined
+      )
     case "ingest-started":
       return {
         ...state,
@@ -360,8 +589,7 @@ function workflowReducer(
         error: undefined,
       }
     case "ingest-changed":
-      if (isOlderJob(action.job, state.job)) return state
-      return applyJob(state, action.job)
+      return applyIngestEvent(state, action.event)
     case "index-refreshed":
       return {
         ...state,
@@ -377,12 +605,67 @@ function workflowReducer(
   }
 }
 
+function applyIngestEvent(
+  state: WorkflowState,
+  event: WikiIngestChangedEvent
+): WorkflowState {
+  if (isOlderJob(event.job, state.job)) return state
+  return applyJob(state, event.job)
+}
+
 function applyJob(state: WorkflowState, job?: WikiIngestJob): WorkflowState {
   if (!job) return { ...state, job: undefined, busy: null }
   if (job.status === "running") {
     return { ...state, job, busy: "ingest", error: undefined }
   }
-  return { ...state, job, busy: null, error: undefined }
+  const workspace =
+    job.status === "completed" && job.result && state.workspace
+      ? {
+          ...state.workspace,
+          commitHash: job.result.commitHash,
+          setupStatus: "ready" as const,
+        }
+      : state.workspace
+  return { ...state, workspace, job, busy: null, error: undefined }
+}
+
+function WorkspaceSwitcher({
+  workspaces,
+  activeWorkspaceId,
+  busy,
+  onActivate,
+  onOpen,
+}: {
+  workspaces: readonly WorkspaceListItem[]
+  activeWorkspaceId?: string
+  busy: boolean
+  onActivate: (workspaceId: string) => void
+  onOpen: () => void
+}) {
+  return (
+    <div className="mb-8 flex flex-col gap-3 rounded-lg border bg-card p-3 text-card-foreground sm:flex-row sm:items-center sm:justify-between">
+      <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-muted-foreground">
+        Workspace
+        <select
+          className="h-9 rounded-md border bg-background px-3 text-sm text-foreground shadow-xs outline-none disabled:opacity-50"
+          value={activeWorkspaceId ?? ""}
+          disabled={busy || workspaces.length < 2}
+          onChange={(event) => onActivate(event.target.value)}
+        >
+          {workspaces.map((workspace) => (
+            <option key={workspace.id} value={workspace.id}>
+              {workspace.name}
+              {workspace.running ? " - running" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button type="button" variant="outline" disabled={busy} onClick={onOpen}>
+        {busy ? <Spinner data-icon="inline-start" /> : null}
+        Open workspace
+      </Button>
+    </div>
+  )
 }
 
 function isOlderJob(next: WikiIngestJob, current?: WikiIngestJob): boolean {

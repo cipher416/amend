@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4",
+    "@tanstack/react-query": "^5.101.3",
     "@tanstack/react-router": "latest",
     "@tanstack/react-start": "latest",
     "@workspace/contract": "workspace:*",

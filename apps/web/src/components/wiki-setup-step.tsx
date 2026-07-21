@@ -43,10 +43,12 @@ export function WikiSetupStep({
   objective,
   job,
   busy,
+  opening,
   submitting,
   error,
   onFieldChange,
   onChooseLocation,
+  onOpenWorkspace,
   onRegisterDocument,
   onDocumentError,
   onSubmit,
@@ -61,6 +63,7 @@ export function WikiSetupStep({
   objective: string
   job?: WikiIngestJob
   busy: boolean
+  opening: boolean
   submitting: boolean
   error?: string
   onFieldChange: (
@@ -68,6 +71,7 @@ export function WikiSetupStep({
     value: string
   ) => void
   onChooseLocation: () => void
+  onOpenWorkspace: () => void
   onRegisterDocument: (file: File) => void
   onDocumentError: (message: string) => void
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
@@ -129,12 +133,26 @@ export function WikiSetupStep({
 
       <FieldGroup className="gap-8">
         <section aria-labelledby="workspace-fields">
-          <h2
-            id="workspace-fields"
-            className="mb-4 text-xs font-medium text-muted-foreground"
-          >
-            Workspace
-          </h2>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2
+              id="workspace-fields"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Workspace
+            </h2>
+            {!workspaceLocked ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={onOpenWorkspace}
+              >
+                {opening ? <Spinner data-icon="inline-start" /> : null}
+                {opening ? "Opening" : "Open existing workspace"}
+              </Button>
+            ) : null}
+          </div>
           <div className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field data-disabled={workspaceLocked || undefined}>
