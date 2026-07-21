@@ -26,6 +26,9 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "lightningcss"
-    ]
+    ],
+    "patchedDependencies": {
+      "@earendil-works/pi-ai@0.80.6": "patches/@earendil-works__pi-ai@0.80.6.patch"
+    }
   }
 }

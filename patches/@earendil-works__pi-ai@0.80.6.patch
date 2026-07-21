@@ -1,0 +1,82 @@
+diff --git a/dist/utils/oauth/anthropic.js b/dist/utils/oauth/anthropic.js
+index 6972a577e6bdcac954ada04031085111308bdbf5..5219b4d85480312ca07c05dc2c516a04daf43953 100644
+--- a/dist/utils/oauth/anthropic.js
++++ b/dist/utils/oauth/anthropic.js
+@@ -193,6 +193,10 @@ export async function loginAnthropic(options) {
+     let code;
+     let state;
+     let redirectUriForExchange = REDIRECT_URI;
++    const onAbort = () => {
++        server.cancelWait();
++    };
++    options.signal?.addEventListener("abort", onAbort);
+     try {
+         const authParams = new URLSearchParams({
+             code: "true",
+@@ -261,6 +265,9 @@ export async function loginAnthropic(options) {
+                 redirectUriForExchange = REDIRECT_URI;
+             }
+         }
++        if (!code && options.signal?.aborted) {
++            throw new DOMException("The login was cancelled.", "AbortError");
++        }
+         if (!code) {
+             const input = await options.onPrompt({
+                 message: "Paste the authorization code or full redirect URL:",
+@@ -283,6 +290,7 @@ export async function loginAnthropic(options) {
+         return exchangeAuthorizationCode(code, state, verifier, redirectUriForExchange);
+     }
+     finally {
++        options.signal?.removeEventListener("abort", onAbort);
+         server.server.close();
+     }
+ }
+@@ -355,6 +363,7 @@ export const anthropicOAuthProvider = {
+             onPrompt: callbacks.onPrompt,
+             onProgress: callbacks.onProgress,
+             onManualCodeInput: callbacks.onManualCodeInput,
++            signal: callbacks.signal,
+         });
+     },
+     async refreshToken(credentials) {
+diff --git a/dist/utils/oauth/openai-codex.js b/dist/utils/oauth/openai-codex.js
+index 3b5925156d44b0c12409e83f7cb9e5e488cfc754..146ece98b3e5ccc56222ae5473bf57a79c34841b 100644
+--- a/dist/utils/oauth/openai-codex.js
++++ b/dist/utils/oauth/openai-codex.js
+@@ -367,6 +367,10 @@ export async function loginOpenAICodex(options) {
+     const server = await startLocalOAuthServer(state);
+     options.onAuth({ url, instructions: "A browser window should open. Complete login to finish." });
+     let code;
++    const onAbort = () => {
++        server.cancelWait();
++    };
++    options.signal?.addEventListener("abort", onAbort);
+     try {
+         if (options.onManualCodeInput) {
+             // Race between browser callback and manual input
+@@ -422,6 +426,9 @@ export async function loginOpenAICodex(options) {
+             }
+         }
+         // Fallback to onPrompt if still no code
++        if (!code && options.signal?.aborted) {
++            throw new DOMException("The login was cancelled.", "AbortError");
++        }
+         if (!code) {
+             const input = await options.onPrompt({
+                 message: "Paste the authorization code (or full redirect URL):",
+@@ -438,6 +445,7 @@ export async function loginOpenAICodex(options) {
+         return exchangeAuthorizationCodeForCredentials(code, verifier, REDIRECT_URI);
+     }
+     finally {
++        options.signal?.removeEventListener("abort", onAbort);
+         server.close();
+     }
+ }
+@@ -525,6 +533,7 @@ export const openaiCodexOAuthProvider = {
+             onPrompt: callbacks.onPrompt,
+             onProgress: callbacks.onProgress,
+             onManualCodeInput: callbacks.onManualCodeInput,
++            signal: callbacks.signal,
+         });
+     },
+     async refreshToken(credentials) {
