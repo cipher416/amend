@@ -27,6 +27,7 @@ import { WorkflowError } from "./wiki-workflow-ui"
 import { WorkspaceSession, useWorkspaceSession } from "./workspace-session"
 import { WorkspaceFileSearch } from "./workspace-file-search"
 import { WorkspaceSidebar } from "./workspace-sidebar"
+import { ThemeProvider } from "./theme"
 
 interface WorkspaceViewContextValue {
   desktop: AmendApi
@@ -216,15 +217,17 @@ function WorkspaceShell({
   children: ReactNode
 }) {
   return (
-    <TooltipProvider>
-      <SidebarProvider>
-        <Sidebar collapsible="offcanvas">
-          {sidebar}
-          <SidebarRail />
-        </Sidebar>
-        <SidebarInset>{children}</SidebarInset>
-      </SidebarProvider>
-    </TooltipProvider>
+    <ThemeProvider>
+      <TooltipProvider>
+        <SidebarProvider>
+          <Sidebar collapsible="offcanvas">
+            {sidebar}
+            <SidebarRail />
+          </Sidebar>
+          <SidebarInset>{children}</SidebarInset>
+        </SidebarProvider>
+      </TooltipProvider>
+    </ThemeProvider>
   )
 }
 

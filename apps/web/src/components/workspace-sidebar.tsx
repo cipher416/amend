@@ -31,6 +31,7 @@ import {
 } from "@workspace/ui/components/dropdown-menu"
 import {
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -44,6 +45,7 @@ import { Spinner } from "@workspace/ui/components/spinner"
 
 import { WorkspaceAddDocument } from "./workspace-add-document"
 import { WorkspaceSearch } from "./workspace-search"
+import { ThemeMenu } from "./theme"
 
 export function WorkspaceSidebar({
   desktop,
@@ -109,6 +111,9 @@ export function WorkspaceSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter>
+        <ThemeMenu />
+      </SidebarFooter>
     </>
   )
 }

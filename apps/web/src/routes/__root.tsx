@@ -8,6 +8,15 @@ import {
 
 import appCss from "@workspace/ui/globals.css?url"
 
+const themeScript = `(() => {
+  let storedTheme
+  try { storedTheme = localStorage.getItem("amend-theme") } catch {}
+  const theme = ["light", "dark", "system"].includes(storedTheme) ? storedTheme : "system"
+  const dark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches)
+  document.documentElement.classList.toggle("dark", dark)
+  document.documentElement.style.colorScheme = dark ? "dark" : "light"
+})()`
+
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient
 }>()({
@@ -50,9 +59,10 @@ function RootComponent() {
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body>
         {children}
