@@ -1,7 +1,7 @@
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { app, BrowserWindow, nativeTheme, session, shell } from "electron"
+import { app, BrowserWindow, Menu, nativeTheme, session, shell } from "electron"
 
 import { registerAppearanceIpc, registerPiIpc, registerWikiIpc } from "./ipc"
 import { PiCredentialService } from "./pi-credential-service"
@@ -23,6 +23,7 @@ let shutdownStarted = false
 let shutdownComplete = false
 
 function createWindow() {
+  Menu.setApplicationMenu(null)
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
