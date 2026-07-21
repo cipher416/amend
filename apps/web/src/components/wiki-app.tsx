@@ -236,7 +236,7 @@ function WikiMain({
         <WikiFileSearch contentRef={contentRef} file={selectedFile} />
       </header>
       <main className="h-[calc(100svh-4rem)] w-full scroll-fade overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl px-8 py-8">
+        <div className="mx-auto w-full max-w-6xl px-8 py-8">
           <WorkflowError message={error} />
           {busy === "file" ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">

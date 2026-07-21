@@ -109,31 +109,45 @@ export function WikiFileViewer({
         }))}
         single
       >
-        <article className="text-card-foreground">
-          {document ? (
-            <DocumentMetadata document={document} wikiId={wikiId} />
+        <div
+          className={
+            contents.length
+              ? "lg:grid lg:grid-cols-[minmax(0,1fr)_13rem] lg:gap-12"
+              : undefined
+          }
+        >
+          <article className="min-w-0 text-card-foreground">
+            {document ? (
+              <DocumentMetadata document={document} wikiId={wikiId} />
+            ) : null}
+            <Streamdown
+              mode="static"
+              className="space-y-5 text-[0.9375rem] leading-7 text-foreground [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_h1]:mt-0 [&_h1]:text-3xl [&_h1]:font-medium [&_h1]:tracking-tight [&_h2]:mt-7 [&_h2]:text-2xl [&_h2]:font-medium [&_h2]:tracking-tight [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-medium [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:scroll-fade-x [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_ul]:list-disc [&_ul]:pl-6"
+              components={{
+                a: WikiMarkdownLink,
+                h1: createMarkdownHeading(1, headings),
+                h2: createMarkdownHeading(2, headings),
+                h3: createMarkdownHeading(3, headings),
+                h4: createMarkdownHeading(4, headings),
+                h5: createMarkdownHeading(5, headings),
+                h6: createMarkdownHeading(6, headings),
+              }}
+              rehypePlugins={[defaultRehypePlugins.sanitize]}
+              urlTransform={(url) =>
+                wikiFileRoute(url) || isSafeExternalUrl(url) ? url : null
+              }
+            >
+              {resolveWikiLinks(content, wikiId, files)}
+            </Streamdown>
+          </article>
+          {contents.length ? (
+            <aside className="hidden lg:block">
+              <div className="sticky top-8">
+                <TableOfContents headings={contents} />
+              </div>
+            </aside>
           ) : null}
-          {contents.length ? <TableOfContents headings={contents} /> : null}
-          <Streamdown
-            mode="static"
-            className="space-y-5 text-[0.9375rem] leading-7 text-foreground [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_h1]:mt-0 [&_h1]:text-3xl [&_h1]:font-medium [&_h1]:tracking-tight [&_h2]:mt-7 [&_h2]:text-2xl [&_h2]:font-medium [&_h2]:tracking-tight [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-medium [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:scroll-fade-x [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_ul]:list-disc [&_ul]:pl-6"
-            components={{
-              a: WikiMarkdownLink,
-              h1: createMarkdownHeading(1, headings),
-              h2: createMarkdownHeading(2, headings),
-              h3: createMarkdownHeading(3, headings),
-              h4: createMarkdownHeading(4, headings),
-              h5: createMarkdownHeading(5, headings),
-              h6: createMarkdownHeading(6, headings),
-            }}
-            rehypePlugins={[defaultRehypePlugins.sanitize]}
-            urlTransform={(url) =>
-              wikiFileRoute(url) || isSafeExternalUrl(url) ? url : null
-            }
-          >
-            {resolveWikiLinks(content, wikiId, files)}
-          </Streamdown>
-        </article>
+        </div>
       </AnchorProvider>
     )
   }
@@ -157,22 +171,19 @@ function TableOfContents({
   const listRef = useRef<HTMLOListElement>(null)
 
   return (
-    <nav
-      aria-label="Table of contents"
-      className="mb-8 rounded-lg border bg-muted/30 p-4"
-    >
-      <p className="mb-2 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
+    <nav aria-label="Table of contents">
+      <p className="mb-3 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
         On this page
       </p>
       <ScrollProvider containerRef={listRef}>
         <ol
           ref={listRef}
-          className="max-h-52 space-y-1 overflow-y-auto text-sm"
+          className="max-h-[calc(100svh-10rem)] space-y-1 overflow-y-auto border-l text-sm"
         >
           {headings.map((heading) => (
-            <li key={heading.id} className={heading.level === 3 ? "pl-4" : ""}>
+            <li key={heading.id} className={heading.level === 3 ? "pl-3" : ""}>
               <TOCItem
-                className="text-muted-foreground transition-colors hover:text-foreground data-[active=true]:font-medium data-[active=true]:text-foreground"
+                className="-ml-px block border-l-2 border-transparent py-1 pl-3 text-muted-foreground transition-colors hover:text-foreground data-[active=true]:border-primary data-[active=true]:font-medium data-[active=true]:text-foreground"
                 href={`#${heading.id}`}
               >
                 {heading.text}
