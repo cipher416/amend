@@ -681,7 +681,7 @@ function createDesktopApi({
                     mediaType: "markdown",
                     size: 190,
                     content:
-                      "---\ntitle: Write-Ahead Logging\ncreated: 2026-07-20\nupdated: 2026-07-20\ntype: concept\ntags:\n  - storage\nsources:\n  - raw/papers/paper.md\n---\n\n# Write-ahead logging\n\nSee [[checkpointing]].\n\n[Reference](https://example.com/workspace/other/page).",
+                      "---\r\ntitle: Write-Ahead Logging\r\ncreated: 2026-07-20\r\nupdated: 2026-07-20\r\ntype: concept\r\ntags:\r\n  - storage\r\nsources:\r\n  - raw/papers/paper.md\r\n---\r\n\r\n# Write-ahead logging\r\n\r\nSee [[checkpointing]].\r\n\r\n[Reference](https://example.com/workspace/other/page).",
                   }
         return success(file)
       }),

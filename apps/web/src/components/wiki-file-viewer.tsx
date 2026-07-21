@@ -17,6 +17,7 @@ export interface MarkdownDocument {
 }
 
 export function parseMarkdownDocument(content: string): MarkdownDocument {
+  const normalizedContent = content.replaceAll("\r\n", "\n")
   const metadata: {
     title?: string
     created?: string
@@ -25,12 +26,14 @@ export function parseMarkdownDocument(content: string): MarkdownDocument {
     tags: string[]
     sources: string[]
   } = { tags: [], sources: [] }
-  if (!content.startsWith("---\n")) return { body: content, metadata }
-  const end = content.indexOf("\n---\n", 4)
-  if (end === -1) return { body: content, metadata }
+  if (!normalizedContent.startsWith("---\n")) {
+    return { body: normalizedContent, metadata }
+  }
+  const end = normalizedContent.indexOf("\n---\n", 4)
+  if (end === -1) return { body: normalizedContent, metadata }
 
   let listKey: "tags" | "sources" | undefined
-  for (const line of content.slice(4, end).split("\n")) {
+  for (const line of normalizedContent.slice(4, end).split("\n")) {
     const listItem = /^\s+-\s+(.+)$/.exec(line)
     if (listItem && listKey) {
       metadata[listKey].push(unquoteFrontmatterValue(listItem[1]))
@@ -57,7 +60,9 @@ export function parseMarkdownDocument(content: string): MarkdownDocument {
   }
 
   return {
-    body: content.slice(end + "\n---\n".length).replace(/^\n/, ""),
+    body: normalizedContent
+      .slice(end + "\n---\n".length)
+      .replace(/^\n/, ""),
     metadata,
   }
 }
