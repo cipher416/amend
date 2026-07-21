@@ -75,7 +75,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   )
 }
 
-export function ThemeMenu() {
+export function ThemeMenu({ settings }: { settings?: ReactNode }) {
   const { theme, setTheme } = useTheme()
 
   return (
@@ -111,13 +111,15 @@ export function ThemeMenu() {
         </DropdownMenu>
       </SidebarMenuItem>
       <SidebarMenuItem>
-        <SidebarMenuButton
-          aria-label="Settings"
-          className="w-auto"
-          type="button"
-        >
-          <HugeiconsIcon icon={Settings02Icon} />
-        </SidebarMenuButton>
+        {settings ?? (
+          <SidebarMenuButton
+            aria-label="Settings"
+            className="w-auto"
+            type="button"
+          >
+            <HugeiconsIcon icon={Settings02Icon} />
+          </SidebarMenuButton>
+        )}
       </SidebarMenuItem>
     </SidebarMenu>
   )

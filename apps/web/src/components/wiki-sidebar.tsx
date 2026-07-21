@@ -44,6 +44,7 @@ import {
 import { Spinner } from "@workspace/ui/components/spinner"
 
 import { ThemeMenu } from "./theme"
+import { SettingsMenu } from "./settings-menu"
 import { WikiAddDocument } from "./wiki-add-document"
 import { WikiAvatar } from "./wiki-avatar"
 import { WikiSearch } from "./wiki-search"
@@ -103,7 +104,7 @@ export function WikiSidebar({
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <ThemeMenu />
+        <ThemeMenu settings={<SettingsMenu desktop={desktop} />} />
       </SidebarFooter>
     </>
   )

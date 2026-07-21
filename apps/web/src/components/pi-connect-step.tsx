@@ -527,7 +527,7 @@ function ModelStep({
   )
 }
 
-function ModelPicker({
+export function ModelPicker({
   models,
   value,
   disabled,
