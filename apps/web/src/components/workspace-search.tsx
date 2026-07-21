@@ -42,7 +42,8 @@ export function WorkspaceSearch({
       queryKey: ["workspace", workspace.id, "search", debouncedSearchQuery],
       queryFn: () =>
         searchWiki(desktop, { query: debouncedSearchQuery, limit: 20 }),
-      enabled: open && searchQuery.length > 0 && debouncedSearchQuery.length > 0,
+      enabled:
+        open && searchQuery.length > 0 && debouncedSearchQuery.length > 0,
     },
     queryClient
   )
@@ -109,69 +110,69 @@ export function WorkspaceSearch({
         description="Search indexed wiki pages and source material."
         className="w-[calc(100%-2rem)] max-w-3xl border-border/80 bg-popover/95 shadow-2xl backdrop-blur-xl sm:max-w-3xl"
       >
-          <Command className="p-2" shouldFilter={false}>
-            <CommandInput
-              aria-label="Search wiki"
-              autoFocus
-              placeholder="Search this wiki..."
-              value={query}
-              onValueChange={setQuery}
-            />
-            <CommandList className="mt-2">
-              {searchQuery ? (
-                !waitingForSearch && !search.isFetching ? (
-                  <CommandEmpty>No matching notes or sources.</CommandEmpty>
-                ) : null
-              ) : (
-                <p className="px-3 py-8 text-center text-sm text-muted-foreground">
-                  Search titles, concepts, and source material.
-                </p>
-              )}
-              {waitingForSearch || search.isFetching ? (
-                <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
-                  <Spinner />
-                  <span>Searching wiki</span>
-                </div>
-              ) : null}
-              {search.error ? (
-                <p className="px-3 py-6 text-sm text-destructive">
-                  {search.error.message}
-                </p>
-              ) : null}
-              {search.data?.length ? (
-                <CommandGroup
-                  heading={`${search.data.length} ${search.data.length === 1 ? "result" : "results"}`}
-                >
-                  {search.data.map((result) => (
-                    <CommandItem
-                      key={result.path}
-                      value={`${result.title} ${result.path} ${result.snippet}`}
-                      onSelect={() => openResult(result.path)}
-                    >
-                      <span className="flex min-w-0 flex-1 flex-col gap-1">
-                        <span className="truncate font-medium">
-                          {result.title}
-                        </span>
-                        <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                          <span className="min-w-0 truncate font-mono text-[0.6875rem] text-foreground/65">
-                            {result.path}
-                          </span>
-                          {result.heading ? (
-                            <span className="min-w-0 truncate">
-                              {result.heading}
-                            </span>
-                          ) : null}
-                        </span>
+        <Command className="p-2" shouldFilter={false}>
+          <CommandInput
+            aria-label="Search wiki"
+            autoFocus
+            placeholder="Search this wiki..."
+            value={query}
+            onValueChange={setQuery}
+          />
+          <CommandList className="mt-2">
+            {searchQuery ? (
+              !waitingForSearch && !search.isFetching ? (
+                <CommandEmpty>No matching notes or sources.</CommandEmpty>
+              ) : null
+            ) : (
+              <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+                Search titles, concepts, and source material.
+              </p>
+            )}
+            {waitingForSearch || search.isFetching ? (
+              <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
+                <Spinner />
+                <span>Searching wiki</span>
+              </div>
+            ) : null}
+            {search.error ? (
+              <p className="px-3 py-6 text-sm text-destructive">
+                {search.error.message}
+              </p>
+            ) : null}
+            {search.data?.length ? (
+              <CommandGroup
+                heading={`${search.data.length} ${search.data.length === 1 ? "result" : "results"}`}
+              >
+                {search.data.map((result) => (
+                  <CommandItem
+                    key={result.path}
+                    value={`${result.title} ${result.path} ${result.snippet}`}
+                    onSelect={() => openResult(result.path)}
+                  >
+                    <span className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="truncate font-medium">
+                        {result.title}
                       </span>
-                      <Badge variant="secondary">
-                        {result.pageType ?? result.sourceKind ?? result.kind}
-                      </Badge>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              ) : null}
-            </CommandList>
-          </Command>
+                      <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                        <span className="min-w-0 truncate font-mono text-[0.6875rem] text-foreground/65">
+                          {result.path}
+                        </span>
+                        {result.heading ? (
+                          <span className="min-w-0 truncate">
+                            {result.heading}
+                          </span>
+                        ) : null}
+                      </span>
+                    </span>
+                    <Badge variant="secondary">
+                      {result.pageType ?? result.sourceKind ?? result.kind}
+                    </Badge>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
+          </CommandList>
+        </Command>
       </CommandDialog>
     </>
   )

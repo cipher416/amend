@@ -50,7 +50,7 @@ function CommandDialog({
       </DialogHeader>
       <DialogContent
         className={cn(
-          "top-[12vh] -translate-y-0 overflow-hidden rounded-xl! p-0 animate-none! data-open:animate-none! data-closed:animate-none!",
+          "top-[12vh] -translate-y-0 animate-none! overflow-hidden rounded-xl! p-0 data-open:animate-none! data-closed:animate-none!",
           className
         )}
         overlayClassName="animate-none! data-open:animate-none! data-closed:animate-none!"
@@ -93,7 +93,7 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        "scroll-fade max-h-80 scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
+        "max-h-80 scroll-fade scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
         className
       )}
       {...props}
@@ -108,7 +108,10 @@ function CommandEmpty({
   return (
     <CommandPrimitive.Empty
       data-slot="command-empty"
-      className={cn("py-8 text-center text-sm text-muted-foreground", className)}
+      className={cn(
+        "py-8 text-center text-sm text-muted-foreground",
+        className
+      )}
       {...props}
     />
   )
@@ -167,7 +170,7 @@ function CommandShortcut({
     <span
       data-slot="command-shortcut"
       className={cn(
-        "ml-auto rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium tracking-[0.08em] uppercase text-muted-foreground group-data-selected/command-item:bg-background/70 group-data-selected/command-item:text-accent-foreground",
+        "ml-auto rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground uppercase group-data-selected/command-item:bg-background/70 group-data-selected/command-item:text-accent-foreground",
         className
       )}
       {...props}

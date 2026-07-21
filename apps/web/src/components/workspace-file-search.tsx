@@ -56,9 +56,7 @@ export function WorkspaceFileSearch({
   }, [open])
 
   useEffect(() => {
-    const nextMatches = query
-      ? findTextMatches(contentRef.current, query)
-      : []
+    const nextMatches = query ? findTextMatches(contentRef.current, query) : []
     setMatches(nextMatches)
     setCurrentMatch(0)
   }, [contentRef, file?.content, file?.path, query])
@@ -136,9 +134,13 @@ export function WorkspaceFileSearch({
         />
         <span
           aria-live="polite"
-          className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-[0.625rem] tabular-nums text-muted-foreground"
+          className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-[0.625rem] text-muted-foreground tabular-nums"
         >
-          {query ? (matches.length ? `${currentMatch + 1}/${matches.length}` : "0/0") : ""}
+          {query
+            ? matches.length
+              ? `${currentMatch + 1}/${matches.length}`
+              : "0/0"
+            : ""}
         </span>
       </div>
       <Button
@@ -232,12 +234,12 @@ function clearHighlights() {
 
 function getHighlightRegistry(): HighlightRegistry | undefined {
   const css = globalThis.CSS as unknown as
-    | { highlights?: HighlightRegistry }
-    | undefined
+    { highlights?: HighlightRegistry } | undefined
   return css?.highlights
 }
 
 function getHighlightConstructor(): HighlightConstructor | undefined {
-  return (globalThis as typeof globalThis & { Highlight?: HighlightConstructor })
-    .Highlight
+  return (
+    globalThis as typeof globalThis & { Highlight?: HighlightConstructor }
+  ).Highlight
 }

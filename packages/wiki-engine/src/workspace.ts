@@ -51,9 +51,9 @@ export async function migrateWorkspace(input: {
   const id = validateWorkspaceId((input.createWorkspaceId ?? randomUUID)())
   const migratedManifest = `${JSON.stringify(
     {
-    version: 2,
-    id,
-    domain: legacy.domain,
+      version: 2,
+      id,
+      domain: legacy.domain,
     },
     null,
     2

@@ -277,7 +277,9 @@ export function PiConnectStep({
         {state.phase === "model" ? (
           <ModelStep
             state={state}
-            onModelSelect={(model) => dispatch({ type: "model-selected", model })}
+            onModelSelect={(model) =>
+              dispatch({ type: "model-selected", model })
+            }
             onConfirm={() => void confirmDefaultModel()}
           />
         ) : null}
@@ -453,7 +455,12 @@ function ApiKeyStep({
       </Field>
 
       <div className="flex justify-between">
-        <Button type="button" variant="ghost" disabled={state.busy} onClick={onBack}>
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={state.busy}
+          onClick={onBack}
+        >
           Back
         </Button>
         <Button
