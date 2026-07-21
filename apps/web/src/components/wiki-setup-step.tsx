@@ -166,7 +166,7 @@ export function WikiSetupStep({
                   <p
                     id="wiki-home"
                     aria-labelledby="wiki-home-label"
-                    className="flex h-9 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground"
+                    className="flex h-7 items-center rounded-md border border-input bg-muted px-2 text-sm text-muted-foreground"
                   >
                     <span className="truncate">{home.displayPath}</span>
                   </p>
