@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import type { WikiFileContent, WikiFileTreeItem } from "@workspace/contract"
-import type { JSX } from "react"
+import { AnchorProvider, ScrollProvider, TOCItem } from "fumadocs-core/toc"
+import { useRef, type JSX } from "react"
 import type { Components } from "streamdown"
 import { defaultRehypePlugins, Streamdown } from "streamdown"
 
@@ -14,6 +15,13 @@ export interface MarkdownDocument {
     tags: readonly string[]
     sources: readonly string[]
   }
+}
+
+interface MarkdownHeading {
+  level: number
+  text: string
+  id: string
+  line: number
 }
 
 export function parseMarkdownDocument(content: string): MarkdownDocument {
@@ -87,27 +95,46 @@ export function WikiFileViewer({
     )
   }
   if (file.mediaType === "markdown") {
+    const content = document?.body ?? file.content ?? ""
+    const headings = markdownHeadings(content)
+    const contents = headings.filter(
+      (heading) => heading.level === 2 || heading.level === 3
+    )
     return (
-      <article className="text-card-foreground">
-        {document ? (
-          <DocumentMetadata document={document} wikiId={wikiId} />
-        ) : null}
-        <Streamdown
-          mode="static"
-          className="space-y-5 text-[0.9375rem] leading-7 text-foreground [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_h1]:mt-0 [&_h1]:text-3xl [&_h1]:font-medium [&_h1]:tracking-tight [&_h2]:mt-7 [&_h2]:text-2xl [&_h2]:font-medium [&_h2]:tracking-tight [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-medium [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:scroll-fade-x [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_ul]:list-disc [&_ul]:pl-6"
-          components={{ a: WikiMarkdownLink }}
-          rehypePlugins={[defaultRehypePlugins.sanitize]}
-          urlTransform={(url) =>
-            wikiFileRoute(url) || isSafeExternalUrl(url) ? url : null
-          }
-        >
-          {resolveWikiLinks(
-            document?.body ?? file.content ?? "",
-            wikiId,
-            files
-          )}
-        </Streamdown>
-      </article>
+      <AnchorProvider
+        toc={contents.map((heading) => ({
+          title: heading.text,
+          url: `#${heading.id}`,
+          depth: heading.level,
+        }))}
+        single
+      >
+        <article className="text-card-foreground">
+          {document ? (
+            <DocumentMetadata document={document} wikiId={wikiId} />
+          ) : null}
+          {contents.length ? <TableOfContents headings={contents} /> : null}
+          <Streamdown
+            mode="static"
+            className="space-y-5 text-[0.9375rem] leading-7 text-foreground [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_h1]:mt-0 [&_h1]:text-3xl [&_h1]:font-medium [&_h1]:tracking-tight [&_h2]:mt-7 [&_h2]:text-2xl [&_h2]:font-medium [&_h2]:tracking-tight [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-medium [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:scroll-fade-x [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_ul]:list-disc [&_ul]:pl-6"
+            components={{
+              a: WikiMarkdownLink,
+              h1: createMarkdownHeading(1, headings),
+              h2: createMarkdownHeading(2, headings),
+              h3: createMarkdownHeading(3, headings),
+              h4: createMarkdownHeading(4, headings),
+              h5: createMarkdownHeading(5, headings),
+              h6: createMarkdownHeading(6, headings),
+            }}
+            rehypePlugins={[defaultRehypePlugins.sanitize]}
+            urlTransform={(url) =>
+              wikiFileRoute(url) || isSafeExternalUrl(url) ? url : null
+            }
+          >
+            {resolveWikiLinks(content, wikiId, files)}
+          </Streamdown>
+        </article>
+      </AnchorProvider>
     )
   }
   return (
@@ -119,6 +146,107 @@ export function WikiFileViewer({
         {file.content}
       </div>
     </article>
+  )
+}
+
+function TableOfContents({
+  headings,
+}: {
+  headings: readonly MarkdownHeading[]
+}) {
+  const listRef = useRef<HTMLOListElement>(null)
+
+  return (
+    <nav
+      aria-label="Table of contents"
+      className="mb-8 rounded-lg border bg-muted/30 p-4"
+    >
+      <p className="mb-2 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
+        On this page
+      </p>
+      <ScrollProvider containerRef={listRef}>
+        <ol
+          ref={listRef}
+          className="max-h-52 space-y-1 overflow-y-auto text-sm"
+        >
+          {headings.map((heading) => (
+            <li key={heading.id} className={heading.level === 3 ? "pl-4" : ""}>
+              <TOCItem
+                className="text-muted-foreground transition-colors hover:text-foreground data-[active=true]:font-medium data-[active=true]:text-foreground"
+                href={`#${heading.id}`}
+              >
+                {heading.text}
+              </TOCItem>
+            </li>
+          ))}
+        </ol>
+      </ScrollProvider>
+    </nav>
+  )
+}
+
+function markdownHeadings(content: string): readonly MarkdownHeading[] {
+  const headings: MarkdownHeading[] = []
+  const ids = new Map<string, number>()
+  let fence: { character: "`" | "~"; length: number } | undefined
+
+  for (const [index, line] of content.split("\n").entries()) {
+    const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line)
+    if (fenceMatch) {
+      const marker = fenceMatch[1]
+      if (!fence) {
+        fence = {
+          character: marker[0] as "`" | "~",
+          length: marker.length,
+        }
+      } else if (
+        marker[0] === fence.character &&
+        marker.length >= fence.length
+      ) {
+        fence = undefined
+      }
+      continue
+    }
+    if (fence) continue
+
+    const match = /^(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line)
+    if (!match) continue
+
+    const text = markdownHeadingText(match[2])
+    if (!text) continue
+    const baseId = markdownHeadingId(text)
+    const count = ids.get(baseId) ?? 0
+    ids.set(baseId, count + 1)
+    headings.push({
+      level: match[1].length,
+      text,
+      id: count ? `${baseId}-${count + 1}` : baseId,
+      line: index + 1,
+    })
+  }
+
+  return headings
+}
+
+function markdownHeadingText(value: string): string {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/[~*_]/g, "")
+    .replace(/<[^>]+>/g, "")
+    .trim()
+}
+
+function markdownHeadingId(text: string): string {
+  return (
+    text
+      .toLocaleLowerCase()
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .replace(/[^\p{L}\p{N}\s-]/gu, "")
+      .trim()
+      .replace(/\s+/g, "-") || "section"
   )
 }
 
@@ -256,6 +384,58 @@ type WikiMarkdownLinkComponent = Exclude<
   Components["a"],
   keyof JSX.IntrinsicElements | undefined
 >
+
+type WikiMarkdownHeadingComponent = Exclude<
+  Components["h1"],
+  keyof JSX.IntrinsicElements | undefined
+>
+
+function createMarkdownHeading(
+  level: 1 | 2 | 3 | 4 | 5 | 6,
+  headings: readonly MarkdownHeading[]
+): WikiMarkdownHeadingComponent {
+  return ({ node, ref: _ref, ...props }) => {
+    const line = markdownNodeLine(node)
+    const id = headings.find(
+      (heading) => heading.level === level && heading.line === line
+    )?.id
+    const headingProps = {
+      ...props,
+      id,
+      className: ["scroll-mt-20", props.className].filter(Boolean).join(" "),
+    }
+
+    switch (level) {
+      case 1:
+        return <h1 {...headingProps} />
+      case 2:
+        return <h2 {...headingProps} />
+      case 3:
+        return <h3 {...headingProps} />
+      case 4:
+        return <h4 {...headingProps} />
+      case 5:
+        return <h5 {...headingProps} />
+      case 6:
+        return <h6 {...headingProps} />
+    }
+  }
+}
+
+function markdownNodeLine(node: unknown): number | undefined {
+  if (!node || typeof node !== "object" || !("position" in node)) {
+    return undefined
+  }
+  const position = node.position
+  if (!position || typeof position !== "object" || !("start" in position)) {
+    return undefined
+  }
+  const start = position.start
+  if (!start || typeof start !== "object" || !("line" in start)) {
+    return undefined
+  }
+  return typeof start.line === "number" ? start.line : undefined
+}
 
 const WikiMarkdownLink: WikiMarkdownLinkComponent = ({
   href,

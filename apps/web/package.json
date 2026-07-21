@@ -19,6 +19,7 @@
     "@tanstack/react-start": "latest",
     "@workspace/contract": "workspace:*",
     "@workspace/ui": "workspace:*",
+    "fumadocs-core": "16.11.5",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "streamdown": "^2.5.0",

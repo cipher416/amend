@@ -186,6 +186,24 @@ beforeEach(() => {
     unobserve(_target: Element) {}
     disconnect() {}
   }
+  globalThis.IntersectionObserver = class IntersectionObserver {
+    readonly root = null
+    readonly rootMargin = ""
+    readonly scrollMargin = ""
+    readonly thresholds: readonly number[] = []
+
+    constructor(
+      _callback: IntersectionObserverCallback,
+      _options?: IntersectionObserverInit
+    ) {}
+
+    disconnect() {}
+    observe(_target: Element) {}
+    takeRecords(): IntersectionObserverEntry[] {
+      return []
+    }
+    unobserve(_target: Element) {}
+  }
   window.matchMedia = vi.fn().mockReturnValue({
     matches: false,
     addEventListener: vi.fn(),
@@ -241,6 +259,27 @@ describe("wiki app", () => {
     expect(api.wiki.readFile).toHaveBeenCalledWith({ path: "paper.pdf" })
   })
 
+  it("adds a table of contents for Markdown sections", async () => {
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWikiApp(api, {
+      initialWikiId: wikiSummary.id,
+      initialFilePath: "concepts/write-ahead-logging.md",
+    })
+
+    await screen.findByRole("navigation", { name: "Table of contents" })
+    expect(
+      screen.getByRole("link", { name: "Durability" }).getAttribute("href")
+    ).toBe("#durability")
+    expect(
+      screen.getByRole("link", { name: "Recovery" }).getAttribute("href")
+    ).toBe("#recovery")
+    expect(
+      screen.getByRole("heading", { name: "Durability" }).getAttribute("id")
+    ).toBe("durability")
+  })
+
   it("starts a sibling wiki from the wiki picker", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
@@ -248,9 +287,7 @@ describe("wiki app", () => {
 
     renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
-    await user.click(
-      await screen.findByRole("button", { name: "Create wiki" })
-    )
+    await user.click(await screen.findByRole("button", { name: "Create wiki" }))
 
     expect(routeHarness.creatingWiki).toBe(true)
   })
@@ -681,7 +718,7 @@ function createDesktopApi({
                     mediaType: "markdown",
                     size: 190,
                     content:
-                      "---\r\ntitle: Write-Ahead Logging\r\ncreated: 2026-07-20\r\nupdated: 2026-07-20\r\ntype: concept\r\ntags:\r\n  - storage\r\nsources:\r\n  - raw/papers/paper.md\r\n---\r\n\r\n# Write-ahead logging\r\n\r\nSee [[checkpointing]].\r\n\r\n[Reference](https://example.com/wiki/other/page).",
+                      "---\r\ntitle: Write-Ahead Logging\r\ncreated: 2026-07-20\r\nupdated: 2026-07-20\r\ntype: concept\r\ntags:\r\n  - storage\r\nsources:\r\n  - raw/papers/paper.md\r\n---\r\n\r\n# Write-ahead logging\r\n\r\n## Durability\r\n\r\nSee [[checkpointing]].\r\n\r\n### Recovery\r\n\r\n[Reference](https://example.com/wiki/other/page).",
                   }
         return success(file)
       }),
