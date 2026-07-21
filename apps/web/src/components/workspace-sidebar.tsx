@@ -44,6 +44,7 @@ import {
 import { Spinner } from "@workspace/ui/components/spinner"
 
 import { WorkspaceAddDocument } from "./workspace-add-document"
+import { WorkspaceAvatar } from "./workspace-avatar"
 import { WorkspaceSearch } from "./workspace-search"
 import { ThemeMenu } from "./theme"
 
@@ -145,11 +146,23 @@ function WorkspacePicker({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<SidebarMenuButton size="lg" disabled={switching || opening} />}
+        render={
+          <SidebarMenuButton
+            size="lg"
+            disabled={switching || opening}
+            className="data-[popup-open]:[&>svg:last-child]:rotate-180"
+          />
+        }
       >
-        <HugeiconsIcon icon={Folder01Icon} />
+        <WorkspaceAvatar
+          workspaceId={workspace.id}
+          className="size-6 shrink-0 rounded-md"
+        />
         <span>{workspace.name}</span>
-        <HugeiconsIcon icon={ArrowDown01Icon} className="ml-auto" />
+        <HugeiconsIcon
+          icon={ArrowDown01Icon}
+          className="ml-auto transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent>
         <DropdownMenuRadioGroup
@@ -164,6 +177,10 @@ function WorkspacePicker({
           <DropdownMenuLabel>Switch workspace</DropdownMenuLabel>
           {workspaces.map((item) => (
             <DropdownMenuRadioItem key={item.id} value={item.id}>
+              <WorkspaceAvatar
+                workspaceId={item.id}
+                className="size-5 shrink-0 rounded-sm"
+              />
               <span>{item.name}</span>
               {item.running ? (
                 <Badge className="mr-4 ml-auto" variant="secondary">
