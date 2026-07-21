@@ -1,6 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from "react"
-import { ArrowDown01Icon, Tick02Icon } from "@hugeicons/core-free-icons"
-import { HugeiconsIcon } from "@hugeicons/react"
+import { useEffect, useReducer } from "react"
 import type {
   AmendApi,
   PiLoginEvent,
@@ -10,25 +8,26 @@ import type {
 } from "@workspace/contract"
 import { Button } from "@workspace/ui/components/button"
 import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+  ComboboxValue,
+} from "@workspace/ui/components/combobox"
+import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@workspace/ui/components/command"
 import { Separator } from "@workspace/ui/components/separator"
 import { Spinner } from "@workspace/ui/components/spinner"
 
 import { errorMessage } from "@/lib/amend-client"
-import { cn } from "@workspace/ui/lib/utils"
 
 import { WorkflowError } from "./wiki-workflow-ui"
 
@@ -568,6 +567,8 @@ function ProviderPicker({
   )
 }
 
+type PickerOption = PiModelSummary | PiProviderSummary
+
 function CommandPicker({
   id,
   label,
@@ -584,91 +585,51 @@ function CommandPicker({
   placeholder: string
   searchPlaceholder: string
   emptyLabel: string
-  options: readonly PiModelSummary[] | readonly PiProviderSummary[]
+  options: readonly PickerOption[]
   value?: string
   disabled: boolean
   onChange: (value: string) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const selected = options.find((option) => option.id === value)
-  const listId = `${id}-list`
-
-  useEffect(() => {
-    if (open) inputRef.current?.focus()
-  }, [open])
-
-  const close = () => {
-    setOpen(false)
-    triggerRef.current?.focus()
-  }
+  const selected = options.find((option) => option.id === value) ?? null
 
   return (
-    <div className="relative">
-      <Button
-        ref={triggerRef}
-        id={id}
-        type="button"
-        variant="outline"
-        role="combobox"
-        aria-label={label}
-        aria-expanded={open}
-        aria-controls={open ? listId : undefined}
-        aria-haspopup="listbox"
-        disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault()
-            setOpen(true)
-          }
-        }}
-        className="w-full justify-between"
+    <Combobox
+      items={options}
+      value={selected}
+      disabled={disabled}
+      itemToStringLabel={(option: PickerOption) => option.name}
+      isItemEqualToValue={(option: PickerOption, current: PickerOption) =>
+        option.id === current.id
+      }
+      onValueChange={(option: PickerOption | null) =>
+        onChange(option?.id ?? "")
+      }
+    >
+      <ComboboxTrigger
+        render={
+          <Button
+            id={id}
+            type="button"
+            variant="outline"
+            aria-label={label}
+            className="w-full justify-between font-normal"
+          />
+        }
       >
-        <span className="truncate">{selected?.name ?? placeholder}</span>
-        <HugeiconsIcon icon={ArrowDown01Icon} data-icon="inline-end" />
-      </Button>
-      {open ? (
-        <div className="absolute z-10 mt-1 w-full rounded-lg border bg-popover p-1 text-popover-foreground shadow-md">
-          <Command
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault()
-                close()
-              }
-            }}
-          >
-            <CommandInput ref={inputRef} placeholder={searchPlaceholder} />
-            <CommandList id={listId}>
-              <CommandEmpty>{emptyLabel}</CommandEmpty>
-              <CommandGroup>
-                {options.map((option) => (
-                  <CommandItem
-                    key={option.id}
-                    value={`${option.name} ${option.id}`}
-                    onSelect={() => {
-                      onChange(option.id)
-                      close()
-                    }}
-                  >
-                    <span className="min-w-0 truncate">{option.name}</span>
-                    <HugeiconsIcon
-                      aria-hidden="true"
-                      icon={Tick02Icon}
-                      className={cn(
-                        "ml-auto",
-                        value === option.id ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </div>
-      ) : null}
-    </div>
+        <ComboboxValue placeholder={placeholder} />
+      </ComboboxTrigger>
+      <ComboboxContent>
+        <ComboboxInput showTrigger={false} placeholder={searchPlaceholder} />
+        <ComboboxEmpty>{emptyLabel}</ComboboxEmpty>
+        <ComboboxList>
+          {(option: PickerOption) => (
+            <ComboboxItem key={option.id} value={option}>
+              {option.name}
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   )
 }
 

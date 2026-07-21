@@ -43,6 +43,166 @@ vi.mock("@workspace/ui/components/button", () => ({
   }) => <button {...props} />,
 }))
 
+// Base UI's real Combobox pulls in `@base-ui/utils`'s external-store hooks,
+// which don't render reliably under this Vitest/jsdom setup. Stand in with a
+// minimal combobox that supports what these tests exercise: opening on
+// click, focusing its search input, and selecting the highlighted option on
+// Enter — mirroring how this file already simplifies Button.
+vi.mock("@workspace/ui/components/combobox", async () => {
+  const React = await import("react")
+
+  interface PickerItem {
+    id: string
+    name: string
+  }
+
+  const ComboboxContext = React.createContext<{
+    items: readonly PickerItem[]
+    value: PickerItem | null
+    onValueChange: (value: PickerItem | null) => void
+    open: boolean
+    setOpen: (open: boolean) => void
+  } | null>(null)
+
+  function useComboboxContext() {
+    const context = React.useContext(ComboboxContext)
+    if (!context) {
+      throw new Error("Combobox parts must be used within a Combobox")
+    }
+    return context
+  }
+
+  function Combobox({
+    items,
+    value,
+    onValueChange,
+    children,
+  }: {
+    items: readonly PickerItem[]
+    value: PickerItem | null
+    onValueChange: (value: PickerItem | null) => void
+    disabled?: boolean
+    children: React.ReactNode
+  }) {
+    const [open, setOpen] = React.useState(false)
+    return (
+      <ComboboxContext.Provider
+        value={{ items, value, onValueChange, open, setOpen }}
+      >
+        {children}
+      </ComboboxContext.Provider>
+    )
+  }
+
+  function ComboboxTrigger({
+    render: trigger,
+    children,
+  }: {
+    render: React.ReactElement<React.ComponentProps<"button">>
+    children?: React.ReactNode
+  }) {
+    const { open, setOpen } = useComboboxContext()
+    return React.cloneElement(
+      trigger,
+      {
+        role: "combobox",
+        "aria-expanded": open,
+        onClick: () => setOpen(!open),
+      },
+      children
+    )
+  }
+
+  function ComboboxValue({ placeholder }: { placeholder?: React.ReactNode }) {
+    const { value } = useComboboxContext()
+    return <>{value ? value.name : placeholder}</>
+  }
+
+  function ComboboxContent({ children }: { children: React.ReactNode }) {
+    const { open } = useComboboxContext()
+    return open ? <div>{children}</div> : null
+  }
+
+  function ComboboxInput({ placeholder }: { placeholder?: string }) {
+    const { items, onValueChange, setOpen } = useComboboxContext()
+    const [highlighted, setHighlighted] = React.useState(0)
+    const inputRef = React.useRef<HTMLInputElement>(null)
+    React.useEffect(() => {
+      inputRef.current?.focus()
+    }, [])
+    return (
+      <input
+        ref={inputRef}
+        placeholder={placeholder}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault()
+            setHighlighted((current) => Math.min(current + 1, items.length - 1))
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault()
+            setHighlighted((current) => Math.max(current - 1, 0))
+          } else if (event.key === "Enter") {
+            event.preventDefault()
+            if (items.length > 0) {
+              onValueChange(items[highlighted])
+              setOpen(false)
+            }
+          } else if (event.key === "Escape") {
+            setOpen(false)
+          }
+        }}
+        readOnly
+      />
+    )
+  }
+
+  function ComboboxEmpty({ children }: { children: React.ReactNode }) {
+    const { items } = useComboboxContext()
+    return items.length === 0 ? <div>{children}</div> : null
+  }
+
+  function ComboboxList({
+    children,
+  }: {
+    children: (item: PickerItem, index: number) => React.ReactNode
+  }) {
+    const { items } = useComboboxContext()
+    return <div>{items.map((item, index) => children(item, index))}</div>
+  }
+
+  function ComboboxItem({
+    value,
+    children,
+  }: {
+    value: PickerItem
+    children: React.ReactNode
+  }) {
+    const { onValueChange, setOpen } = useComboboxContext()
+    return (
+      <div
+        role="option"
+        onClick={() => {
+          onValueChange(value)
+          setOpen(false)
+        }}
+      >
+        {children}
+      </div>
+    )
+  }
+
+  return {
+    Combobox,
+    ComboboxTrigger,
+    ComboboxValue,
+    ComboboxContent,
+    ComboboxInput,
+    ComboboxEmpty,
+    ComboboxList,
+    ComboboxItem,
+  }
+})
+
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   globalThis.ResizeObserver = class ResizeObserver {
@@ -195,10 +355,7 @@ describe("first source workflow", () => {
   it("renders the active wiki in the app shell", async () => {
     const api = createDesktopApi({
       wiki: { ...wikiSummary, setupStatus: "ready" },
-      knownWikis: [
-        { ...wikiSummary, setupStatus: "ready" },
-        secondWikiSummary,
-      ],
+      knownWikis: [{ ...wikiSummary, setupStatus: "ready" }, secondWikiSummary],
     })
     window.amend = api
     render(<WikiWorkflow />)
@@ -530,9 +687,7 @@ async function createWiki(
     screen.getByLabelText("Domain"),
     "Database reliability engineering"
   )
-  await user.click(
-    screen.getByRole("button", { name: "Amend home" })
-  )
+  await user.click(screen.getByRole("button", { name: "Amend home" }))
   await screen.findAllByText("/research")
   const input = document.querySelector<HTMLInputElement>('input[type="file"]')
   if (!input) throw new Error("Expected the document file input")
