@@ -1,7 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { WorkspaceEmptyContent } from "@/components/workspace-app"
+import { WorkspaceFileContent } from "@/components/workspace-app"
 
 export const Route = createFileRoute("/workspace/$workspaceId/")({
-  component: WorkspaceEmptyContent,
+  component: WorkspaceIndexRoute,
 })
+
+function WorkspaceIndexRoute() {
+  const { workspaceId } = Route.useParams()
+  return <WorkspaceFileContent workspaceId={workspaceId} filePath="index.md" />
+}

@@ -19,7 +19,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   WorkspaceApp,
-  WorkspaceEmptyContent,
   WorkspaceFileContent,
 } from "./workspace-app"
 
@@ -172,6 +171,16 @@ afterEach(() => {
 })
 
 describe("workspace app", () => {
+  it("opens index.md at the workspace root", async () => {
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+
+    await screen.findByRole("heading", { name: "Reliability Wiki" })
+    expect(api.wiki.readFile).toHaveBeenCalledWith({ path: "index.md" })
+  })
+
   it("renders the workspace file tree and previews selected files", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
@@ -412,7 +421,10 @@ function renderWorkspaceApp(
           filePath={filePath}
         />
       ) : (
-        <WorkspaceEmptyContent />
+        <WorkspaceFileContent
+          workspaceId={workspaceId ?? workspaceSummary.id}
+          filePath="index.md"
+        />
       )
     return <WorkspaceApp workspaceId={workspaceId ?? workspaceSummary.id} />
   }
@@ -495,6 +507,7 @@ function createDesktopApi({
       ),
       listFiles: vi.fn(async () => {
         const files: readonly WikiFileTreeItem[] = [
+          { path: "index.md", name: "index.md", kind: "file" },
           {
             path: "concepts",
             name: "concepts",
@@ -525,7 +538,15 @@ function createDesktopApi({
                 mediaType: "binary",
                 size: 9,
               }
-            : path === "concepts/checkpointing.md"
+            : path === "index.md"
+              ? {
+                  path,
+                  name: "index.md",
+                  mediaType: "markdown",
+                  size: 31,
+                  content: "# Reliability Wiki\n\nWelcome.",
+                }
+              : path === "concepts/checkpointing.md"
               ? {
                   path,
                   name: "checkpointing.md",
