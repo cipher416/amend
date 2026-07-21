@@ -67,10 +67,10 @@ describe("first source workflow", () => {
 
     await screen.findByText("Wiki ready")
     expect(api.workspaces.create).toHaveBeenCalledWith({
-      selectionToken: "selection_1234567890",
       name: "Reliability Wiki",
       domain: "Database reliability engineering",
     })
+    expect(api.workspaces.chooseHome).toHaveBeenCalledOnce()
     expect(api.wiki.startIngest).toHaveBeenCalledWith({
       documentToken: "document_1234567890",
       objective: "Capture recovery ordering",
@@ -129,45 +129,47 @@ describe("first source workflow", () => {
     render(<WikiWorkflow />)
 
     await screen.findByText("Wiki ready")
-    expect(screen.getByText("Your existing wiki is ready to browse.")).toBeDefined()
+    expect(
+      screen.getByText("Your existing wiki is ready to browse.")
+    ).toBeDefined()
     expect(screen.queryByText("Create a knowledge base")).toBeNull()
+  })
+
+  it("starts sibling creation even when a workspace is already active", async () => {
+    const api = createDesktopApi({
+      workspace: { ...workspaceSummary, setupStatus: "ready" },
+    })
+    window.amend = api
+    render(<WikiWorkflow createWorkspace />)
+
+    await screen.findByText("Create a knowledge base")
+  })
+
+  it("creates a sibling workspace only after its first source is selected", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi({
+      workspace: { ...workspaceSummary, setupStatus: "ready" },
+    })
+    api.wiki.registerDocument = vi.fn(async () => {
+      expect(api.workspaces.create).not.toHaveBeenCalled()
+      return success({
+        token: "document_1234567890",
+        displayName: "write-ahead-logging.pdf",
+        suggestedTitle: "write-ahead-logging",
+      })
+    })
+    window.amend = api
+    render(<WikiWorkflow createWorkspace />)
+
+    await createWiki(user)
+
+    expect(api.wiki.startIngest).toHaveBeenCalledOnce()
   })
 
   it("explains that the browser scaffold cannot access local wiki data", async () => {
     render(<WikiWorkflow />)
 
     await screen.findByText("Your wiki lives on your machine.")
-  })
-
-  it("opens an existing workspace without creating a new one", async () => {
-    const user = userEvent.setup()
-    const api = createDesktopApi()
-    window.amend = api
-    render(<WikiWorkflow />)
-
-    await screen.findByText("Create a knowledge base")
-    await user.click(
-      screen.getByRole("button", { name: "Open existing workspace" })
-    )
-
-    expect(api.workspaces.open).toHaveBeenCalledOnce()
-    await screen.findByLabelText("Workspace name")
-    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
-    if (!input) throw new Error("Expected the document file input")
-    await user.upload(
-      input,
-      new File(["source"], "write-ahead-logging.pdf", {
-        type: "application/pdf",
-      })
-    )
-    await user.type(
-      screen.getByLabelText("What matters?"),
-      "Capture recovery ordering"
-    )
-    await user.click(screen.getByRole("button", { name: "Build wiki" }))
-
-    await screen.findByText("Wiki ready")
-    expect(api.workspaces.create).not.toHaveBeenCalled()
   })
 
   it("switches between known workspaces in the app shell", async () => {
@@ -190,38 +192,6 @@ describe("first source workflow", () => {
       workspaceId: secondWorkspaceSummary.id,
     })
     await screen.findByText(secondWorkspaceSummary.displayPath)
-  })
-
-  it("does not show an old ingest after opening another workspace", async () => {
-    const user = userEvent.setup()
-    const runningJob = createJob({
-      status: "running",
-      phase: "writing",
-      message: "Writing the first wiki",
-      cancellable: true,
-    })
-    const api = createDesktopApi({
-      workspace: { ...workspaceSummary, setupStatus: "ready" },
-      job: runningJob,
-      knownWorkspaces: [
-        { ...workspaceSummary, setupStatus: "ready" },
-        secondWorkspaceSummary,
-      ],
-    })
-    let opened = false
-    api.workspaces.open = vi.fn(async () => {
-      opened = true
-      return success(secondWorkspaceSummary)
-    })
-    api.wiki.currentIngest = vi.fn(async () => success(opened ? null : runningJob))
-    window.amend = api
-    render(<WikiWorkflow />)
-
-    await screen.findByText("Writing the first wiki")
-    await user.click(screen.getByRole("button", { name: "Open workspace" }))
-
-    await screen.findByText("Wiki ready")
-    expect(screen.queryByText("Writing the first wiki")).toBeNull()
   })
 })
 
@@ -344,18 +314,9 @@ function createDesktopApi(
       }),
     },
     workspaces: {
-      chooseLocation: vi.fn(async () =>
-        success({
-          token: "selection_1234567890",
-          displayPath: "/research",
-        })
-      ),
+      chooseHome: vi.fn(async () => success({ displayPath: "/research" })),
+      home: vi.fn(async () => success(null)),
       create: vi.fn(async () => {
-        workspace = workspaceSummary
-        upsertWorkspaceItem(workspaceItems, workspace, true, false)
-        return success(workspaceSummary)
-      }),
-      open: vi.fn(async () => {
         workspace = workspaceSummary
         upsertWorkspaceItem(workspaceItems, workspace, true, false)
         return success(workspaceSummary)
@@ -546,7 +507,7 @@ async function createWiki(
     screen.getByLabelText("Domain"),
     "Database reliability engineering"
   )
-  await user.click(screen.getByRole("button", { name: "Parent location" }))
+  await user.click(screen.getByRole("button", { name: "Amend home" }))
   await screen.findAllByText("/research")
   const input = document.querySelector<HTMLInputElement>('input[type="file"]')
   if (!input) throw new Error("Expected the document file input")

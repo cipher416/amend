@@ -54,16 +54,8 @@ export function WorkspaceApp({ workspaceId }: { workspaceId: string }) {
 }
 
 function WorkspaceAppContent() {
-  const {
-    desktop,
-    opening,
-    workspace,
-    workspaces,
-    files,
-    busy,
-    error,
-    openWorkspace,
-  } = useWorkspaceSession()
+  const { desktop, opening, workspace, workspaces, files, busy, error } =
+    useWorkspaceSession()
   const { _splat: selectedPath } = useParams({ strict: false })
 
   if (opening) return <WorkspaceOpening />
@@ -90,8 +82,6 @@ function WorkspaceAppContent() {
             selectedPath={selectedPath}
             switching={busy === "switch"}
             loadingFiles={busy === "files"}
-            openingWorkspace={busy === "open"}
-            onOpenWorkspace={openWorkspace}
             running={running}
           />
         }
@@ -261,7 +251,7 @@ function WorkspaceMain({
         </p>
         <WorkspaceFileSearch contentRef={contentRef} file={selectedFile} />
       </header>
-      <main className="scroll-fade h-[calc(100svh-4rem)] w-full overflow-y-auto">
+      <main className="h-[calc(100svh-4rem)] w-full scroll-fade overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <WorkflowError message={error} />
           {busy === "file" ? (

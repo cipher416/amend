@@ -56,8 +56,6 @@ export function WorkspaceSidebar({
   selectedPath,
   switching,
   loadingFiles,
-  openingWorkspace,
-  onOpenWorkspace,
   running,
 }: {
   desktop: AmendApi
@@ -67,8 +65,6 @@ export function WorkspaceSidebar({
   selectedPath?: string
   switching: boolean
   loadingFiles: boolean
-  openingWorkspace: boolean
-  onOpenWorkspace: () => Promise<string | null>
   running: boolean
 }) {
   return (
@@ -78,8 +74,6 @@ export function WorkspaceSidebar({
           workspace={workspace}
           workspaces={workspaces}
           switching={switching}
-          opening={openingWorkspace}
-          onOpenWorkspace={onOpenWorkspace}
         />
         <WorkspaceSearch desktop={desktop} workspace={workspace} />
         <WorkspaceAddDocument
@@ -123,25 +117,12 @@ function WorkspacePicker({
   workspace,
   workspaces,
   switching,
-  opening,
-  onOpenWorkspace,
 }: {
   workspace: WorkspaceSummary
   workspaces: readonly WorkspaceListItem[]
   switching: boolean
-  opening: boolean
-  onOpenWorkspace: () => Promise<string | null>
 }) {
   const navigate = useNavigate()
-
-  async function openWorkspace() {
-    const workspaceId = await onOpenWorkspace()
-    if (!workspaceId) return
-    void navigate({
-      to: "/workspace/$workspaceId",
-      params: { workspaceId },
-    })
-  }
 
   return (
     <DropdownMenu>
@@ -149,7 +130,7 @@ function WorkspacePicker({
         render={
           <SidebarMenuButton
             size="lg"
-            disabled={switching || opening}
+            disabled={switching}
             className="data-[popup-open]:[&>svg:last-child]:rotate-180"
           />
         }
@@ -192,10 +173,11 @@ function WorkspacePicker({
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          disabled={opening}
-          onClick={() => void openWorkspace()}
+          onClick={() =>
+            void navigate({ to: "/", search: { createWorkspace: true } })
+          }
         >
-          Open workspace
+          Create wiki
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

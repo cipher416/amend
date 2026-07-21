@@ -15,14 +15,13 @@ import {
   activateWorkspaceById,
   listFiles,
   listWorkspaces,
-  openExistingWorkspace,
   readCurrentWorkspace,
   workspaceCurrentKey,
   workspaceFilesKey,
   workspacesKey,
 } from "@/lib/workspace-queries"
 
-export type WorkspaceBusy = "open" | "switch" | "files" | "file" | null
+export type WorkspaceBusy = "switch" | "files" | "file" | null
 
 interface WorkspaceSessionValue {
   desktop: AmendApi
@@ -32,7 +31,6 @@ interface WorkspaceSessionValue {
   files: readonly WikiFileTreeItem[]
   busy: WorkspaceBusy
   error?: string
-  openWorkspace: () => Promise<string | null>
 }
 
 const WorkspaceSessionContext = createContext<WorkspaceSessionValue | null>(
@@ -103,25 +101,6 @@ function useWorkspaceSessionState({
     },
     queryClient
   )
-  const openWorkspace = useMutation(
-    {
-      mutationFn: () => openExistingWorkspace(desktop),
-      onMutate: () => setOperationError(undefined),
-      onSuccess: (workspace) => {
-        if (!workspace) {
-          void queryClient.invalidateQueries({ queryKey: workspacesKey })
-          return
-        }
-        queryClient.setQueryData(workspaceCurrentKey, workspace)
-        void queryClient.invalidateQueries({ queryKey: workspacesKey })
-        void queryClient.invalidateQueries({
-          queryKey: workspaceFilesKey(workspace.id),
-        })
-      },
-      onError: (cause) => setOperationError(errorMessage(cause)),
-    },
-    queryClient
-  )
   useEffect(() => {
     if (currentWorkspace.isPending || activateWorkspace.isPending) return
     if (currentWorkspace.data?.id === workspaceId) return
@@ -163,13 +142,11 @@ function useWorkspaceSessionState({
     currentWorkspace.isPending ||
     workspaces.isPending ||
     resolvingRouteWorkspace
-  const busy: WorkspaceBusy = openWorkspace.isPending
-    ? "open"
-    : activateWorkspace.isPending
-      ? "switch"
-      : files.isPending && files.fetchStatus !== "idle"
-        ? "files"
-        : null
+  const busy: WorkspaceBusy = activateWorkspace.isPending
+    ? "switch"
+    : files.isPending && files.fetchStatus !== "idle"
+      ? "files"
+      : null
   const error =
     operationError ??
     queryErrorMessage(currentWorkspace.error) ??
@@ -184,7 +161,6 @@ function useWorkspaceSessionState({
     files: files.data ?? [],
     busy,
     error,
-    openWorkspace: async () => (await openWorkspace.mutateAsync())?.id ?? null,
   }
 }
 

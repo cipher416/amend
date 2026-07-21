@@ -18,10 +18,7 @@ import { useState } from "react"
 import type { ButtonHTMLAttributes, ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import {
-  WorkspaceApp,
-  WorkspaceFileContent,
-} from "./workspace-app"
+import { WorkspaceApp, WorkspaceFileContent } from "./workspace-app"
 
 const routeHarness = vi.hoisted(() => ({
   workspaceId: undefined as string | undefined,
@@ -30,6 +27,7 @@ const routeHarness = vi.hoisted(() => ({
   renderOutlet: undefined as undefined | (() => ReactNode),
   navigate: undefined as
     undefined | ((workspaceId: string, filePath?: string) => void),
+  creatingWorkspace: false,
 }))
 
 interface MockRouteParams {
@@ -60,8 +58,20 @@ vi.mock("@tanstack/react-router", () => ({
   ),
   useNavigate:
     () =>
-    ({ params }: { params: MockRouteParams }) => {
-      if (params.workspaceId) {
+    ({
+      params,
+      search,
+      to,
+    }: {
+      params?: MockRouteParams
+      search?: { createWorkspace?: boolean }
+      to?: string
+    }) => {
+      if (to === "/" && search?.createWorkspace) {
+        routeHarness.creatingWorkspace = true
+        return
+      }
+      if (params?.workspaceId) {
         routeHarness.navigate?.(params.workspaceId, params._splat)
       }
     },
@@ -191,6 +201,7 @@ afterEach(() => {
   routeHarness.queryClient = undefined
   routeHarness.renderOutlet = undefined
   routeHarness.navigate = undefined
+  routeHarness.creatingWorkspace = false
 })
 
 describe("workspace app", () => {
@@ -230,7 +241,7 @@ describe("workspace app", () => {
     expect(api.wiki.readFile).toHaveBeenCalledWith({ path: "paper.pdf" })
   })
 
-  it("opens an existing workspace from the workspace picker", async () => {
+  it("starts a sibling workspace from the workspace picker", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
     window.amend = api
@@ -238,10 +249,10 @@ describe("workspace app", () => {
     renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
 
     await user.click(
-      await screen.findByRole("button", { name: "Open workspace" })
+      await screen.findByRole("button", { name: "Create wiki" })
     )
 
-    await waitFor(() => expect(api.workspaces.open).toHaveBeenCalledOnce())
+    expect(routeHarness.creatingWorkspace).toBe(true)
   })
 
   it("adds a document with editable workspace guidance", async () => {
@@ -364,7 +375,9 @@ describe("workspace app", () => {
 
     renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
 
-    await user.click(await screen.findByRole("button", { name: /search wiki/i }))
+    await user.click(
+      await screen.findByRole("button", { name: /search wiki/i })
+    )
     await user.type(
       await screen.findByPlaceholderText("Search this wiki..."),
       "checkpointing"
@@ -557,9 +570,9 @@ function createDesktopApi({
       setTheme: vi.fn(async () => success(null)),
     },
     workspaces: {
-      chooseLocation: vi.fn(async () => success(null)),
+      chooseHome: vi.fn(async () => success(null)),
+      home: vi.fn(async () => success({ displayPath: "/research" })),
       create: vi.fn(async () => success(workspaceSummary)),
-      open: vi.fn(async () => success(workspaceSummary)),
       current: vi.fn(async () => success(workspaceSummary)),
       list: vi.fn(async () =>
         success([
@@ -655,21 +668,21 @@ function createDesktopApi({
                   content: "# Reliability Wiki\n\nWelcome. Welcome.",
                 }
               : path === "concepts/checkpointing.md"
-              ? {
-                  path,
-                  name: "checkpointing.md",
-                  mediaType: "markdown",
-                  size: 17,
-                  content: "# Checkpointing",
-                }
-              : {
-                  path,
-                  name: "write-ahead-logging.md",
-                  mediaType: "markdown",
-                  size: 190,
-                  content:
-                    "---\ntitle: Write-Ahead Logging\ncreated: 2026-07-20\nupdated: 2026-07-20\ntype: concept\ntags:\n  - storage\nsources:\n  - raw/papers/paper.md\n---\n\n# Write-ahead logging\n\nSee [[checkpointing]].\n\n[Reference](https://example.com/workspace/other/page).",
-                }
+                ? {
+                    path,
+                    name: "checkpointing.md",
+                    mediaType: "markdown",
+                    size: 17,
+                    content: "# Checkpointing",
+                  }
+                : {
+                    path,
+                    name: "write-ahead-logging.md",
+                    mediaType: "markdown",
+                    size: 190,
+                    content:
+                      "---\ntitle: Write-Ahead Logging\ncreated: 2026-07-20\nupdated: 2026-07-20\ntype: concept\ntags:\n  - storage\nsources:\n  - raw/papers/paper.md\n---\n\n# Write-ahead logging\n\nSee [[checkpointing]].\n\n[Reference](https://example.com/workspace/other/page).",
+                  }
         return success(file)
       }),
       search: vi.fn(async () => success(searchResults)),

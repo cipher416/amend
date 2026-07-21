@@ -9,22 +9,24 @@ import type {
   SourceDocumentSelection,
   WikiIngestChangedEvent,
   WikiIngestJob,
+  WorkspaceHome,
   WorkspaceListItem,
-  WorkspaceParentSelection,
   WorkspaceSummary,
 } from "@workspace/contract"
-import { Button } from "@workspace/ui/components/button"
 import { Spinner } from "@workspace/ui/components/spinner"
 
 import { errorMessage, useAmendApi } from "@/lib/amend-client"
 import { projectWorkspaceIngestChanged } from "@/lib/workspace-ingest-events"
 import {
+  chooseWorkspaceHome,
   listWorkspaces,
   providerStatusKey,
   readCurrentIngest,
   readCurrentWorkspace,
+  readWorkspaceHome,
   readProviderStatus,
   workspaceCurrentKey,
+  workspaceHomeKey,
   workspaceIngestKey,
   workspacesKey,
 } from "@/lib/workspace-queries"
@@ -35,20 +37,13 @@ import { WikiSetupStep } from "./wiki-setup-step"
 import { WorkflowShell } from "./wiki-workflow-ui"
 
 type BusyOperation =
-  | "location"
-  | "open"
-  | "switch"
-  | "document"
-  | "create"
-  | "ingest"
-  | "index"
-  | null
+  "home" | "switch" | "document" | "create" | "ingest" | "index" | null
 
 interface WorkflowState {
   piConfigured?: boolean
   busy: BusyOperation
   error?: string
-  selection?: WorkspaceParentSelection
+  home?: WorkspaceHome
   workspace?: WorkspaceSummary
   document?: SourceDocumentSelection
   sourceFiles?: File[]
@@ -65,15 +60,16 @@ interface WorkflowStepViewProps {
   state: WorkflowState
   piConfigured: boolean
   workspace?: WorkspaceSummary
+  home?: WorkspaceHome
+  createWorkspace: boolean
   knownWorkspaces: readonly WorkspaceListItem[]
   job?: WikiIngestJob
   error?: string
   onActivateWorkspace: (workspaceId: string) => void
-  onOpenWorkspace: () => void
   onProviderConnected: () => void
   onRetryIndex: () => void
   onFieldChange: (field: EditableField, value: string) => void
-  onChooseLocation: () => void
+  onChooseHome: () => void
   onRegisterDocument: (file: File) => void
   onDocumentError: (message: string) => void
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
@@ -81,8 +77,7 @@ interface WorkflowStepViewProps {
 }
 
 interface WorkflowActions {
-  chooseLocation: () => Promise<void>
-  openWorkspace: () => Promise<void>
+  chooseHome: () => Promise<void>
   registerDocument: (file: File) => Promise<void>
   createWiki: (event: React.FormEvent<HTMLFormElement>) => Promise<void>
   activateWorkspace: (workspaceId: string) => Promise<void>
@@ -95,6 +90,7 @@ interface WorkflowActionsInput {
   api: AmendApi
   state: WorkflowState
   workspace?: WorkspaceSummary
+  home?: WorkspaceHome
   job?: WikiIngestJob
   queryClient: QueryClient
   dispatch: React.Dispatch<WorkflowAction>
@@ -106,14 +102,13 @@ type WorkflowAction =
   | { type: "operation-started"; operation: Exclude<BusyOperation, null> }
   | { type: "operation-finished" }
   | { type: "operation-failed"; message: string }
-  | { type: "location-selected"; selection: WorkspaceParentSelection }
+  | { type: "home-selected"; home: WorkspaceHome }
   | {
       type: "document-selected"
       document: SourceDocumentSelection
       sourceFiles: File[]
     }
   | { type: "workspace-created"; workspace: WorkspaceSummary }
-  | { type: "workspace-opened"; workspace: WorkspaceSummary }
   | {
       type: "workspace-activated"
       workspace: WorkspaceSummary
@@ -130,7 +125,13 @@ const initialWorkflowState: WorkflowState = {
   objective: "",
 }
 
-export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
+export function WikiWorkflow({
+  readyElement,
+  createWorkspace = false,
+}: {
+  readyElement?: ReactNode
+  createWorkspace?: boolean
+}) {
   const queryClient = useRouter().options.context.queryClient
   const [state, dispatch] = useReducer(workflowReducer, initialWorkflowState)
   const desktop = useAmendApi()
@@ -159,7 +160,17 @@ export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
     },
     queryClient
   )
-  const currentWorkspaceId = currentWorkspace.data?.id
+  const workspaceHome = useQuery(
+    {
+      queryKey: workspaceHomeKey,
+      queryFn: () => readWorkspaceHome(requireDesktop(desktop)),
+      enabled: Boolean(desktop),
+    },
+    queryClient
+  )
+  const currentWorkspaceId = createWorkspace
+    ? undefined
+    : currentWorkspace.data?.id
   const currentIngest = useQuery(
     {
       queryKey: currentWorkspaceId
@@ -171,9 +182,12 @@ export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
     queryClient
   )
 
-  const queriedWorkspace = currentWorkspace.data ?? undefined
+  const queriedWorkspace = createWorkspace
+    ? undefined
+    : (currentWorkspace.data ?? undefined)
   const queriedJob = currentIngest.data ?? undefined
   const workspace = state.workspace ?? queriedWorkspace
+  const home = state.home ?? workspaceHome.data ?? undefined
   const job =
     queriedJob && !isOlderJob(queriedJob, state.job) ? queriedJob : state.job
   const piConfigured =
@@ -197,13 +211,19 @@ export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
     (providerStatus.isPending ||
       currentWorkspace.isPending ||
       workspaces.isPending ||
+      workspaceHome.isPending ||
       (Boolean(currentWorkspaceId) && currentIngest.isPending))
   )
   if (desktop === undefined || recovering) {
     return <OpeningScreen />
   }
   if (desktop === null) return <DesktopRequired />
-  if (piConfigured && workspace?.setupStatus === "ready" && readyElement) {
+  if (
+    (!createWorkspace || state.workspace !== undefined) &&
+    piConfigured &&
+    workspace?.setupStatus === "ready" &&
+    readyElement
+  ) {
     return readyElement
   }
 
@@ -212,12 +232,14 @@ export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
     queryErrorMessage(providerStatus.error) ??
     queryErrorMessage(currentWorkspace.error) ??
     queryErrorMessage(workspaces.error) ??
+    queryErrorMessage(workspaceHome.error) ??
     queryErrorMessage(currentIngest.error)
   const error = state.error ?? sessionError
   const actions = useWikiWorkflowActions({
     api,
     state,
     workspace,
+    home,
     job,
     queryClient,
     dispatch,
@@ -235,20 +257,21 @@ export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
       onActivateWorkspace={(workspaceId) =>
         void actions.activateWorkspace(workspaceId)
       }
-      onOpenWorkspace={() => void actions.openWorkspace()}
       onProviderConnected={() => {
         queryClient.setQueryData(providerStatusKey, { configured: true })
         dispatch({ type: "pi-connected" })
       }}
       onRetryIndex={() => void actions.retryIndex()}
       onFieldChange={actions.changeField}
-      onChooseLocation={() => void actions.chooseLocation()}
+      onChooseHome={() => void actions.chooseHome()}
       onRegisterDocument={(file) => void actions.registerDocument(file)}
       onDocumentError={(message) =>
         dispatch({ type: "operation-failed", message })
       }
       onSubmit={(event) => void actions.createWiki(event)}
       onCancel={() => void actions.cancelIngest()}
+      createWorkspace={createWorkspace}
+      home={home}
     />
   )
 }
@@ -257,42 +280,19 @@ function useWikiWorkflowActions({
   api,
   state,
   workspace,
+  home,
   job,
   queryClient,
   dispatch,
 }: WorkflowActionsInput): WorkflowActions {
   return {
-    chooseLocation: async () => {
-      dispatch({ type: "operation-started", operation: "location" })
+    chooseHome: async () => {
+      dispatch({ type: "operation-started", operation: "home" })
       try {
-        const response = await api.workspaces.chooseLocation()
-        if (!response.ok) {
-          dispatch({
-            type: "operation-failed",
-            message: response.error.message,
-          })
-        } else if (response.value) {
-          dispatch({ type: "location-selected", selection: response.value })
-        } else {
-          dispatch({ type: "operation-finished" })
-        }
-      } catch (cause) {
-        dispatch({ type: "operation-failed", message: errorMessage(cause) })
-      }
-    },
-    openWorkspace: async () => {
-      dispatch({ type: "operation-started", operation: "open" })
-      try {
-        const response = await api.workspaces.open()
-        if (!response.ok) {
-          dispatch({
-            type: "operation-failed",
-            message: response.error.message,
-          })
-        } else if (response.value) {
-          queryClient.setQueryData(workspaceCurrentKey, response.value)
-          void queryClient.invalidateQueries({ queryKey: workspacesKey })
-          dispatch({ type: "workspace-opened", workspace: response.value })
+        const home = await chooseWorkspaceHome(api)
+        if (home) {
+          queryClient.setQueryData(workspaceHomeKey, home)
+          dispatch({ type: "home-selected", home })
         } else {
           dispatch({ type: "operation-finished" })
         }
@@ -332,17 +332,16 @@ function useWikiWorkflowActions({
 
       let targetWorkspace = workspace
       if (!targetWorkspace) {
-        if (!state.selection) {
+        if (!home) {
           dispatch({
             type: "operation-failed",
-            message: "Choose where Amend should create the wiki.",
+            message: "Choose an Amend home before creating a workspace.",
           })
           return
         }
         dispatch({ type: "operation-started", operation: "create" })
         try {
           const response = await api.workspaces.create({
-            selectionToken: state.selection.token,
             name: state.wikiName,
             domain: state.domain,
           })
@@ -465,14 +464,15 @@ function WorkflowStepView({
   piConfigured,
   workspace,
   knownWorkspaces,
+  home,
+  createWorkspace,
   job,
   error,
   onActivateWorkspace,
-  onOpenWorkspace,
   onProviderConnected,
   onRetryIndex,
   onFieldChange,
-  onChooseLocation,
+  onChooseHome,
   onRegisterDocument,
   onDocumentError,
   onSubmit,
@@ -480,13 +480,12 @@ function WorkflowStepView({
 }: WorkflowStepViewProps) {
   return (
     <WorkflowShell>
-      {knownWorkspaces.length ? (
+      {!createWorkspace && knownWorkspaces.length ? (
         <WorkspaceSwitcher
           workspaces={knownWorkspaces}
           activeWorkspaceId={workspace?.id}
-          busy={state.busy === "switch" || state.busy === "open"}
+          busy={state.busy === "switch"}
           onActivate={onActivateWorkspace}
-          onOpen={onOpenWorkspace}
         />
       ) : null}
       {!piConfigured ? (
@@ -505,18 +504,16 @@ function WorkflowStepView({
           workspace={workspace}
           wikiName={state.wikiName}
           domain={state.domain}
-          location={state.selection?.displayPath}
+          home={home}
           document={state.document}
           sourceFiles={state.sourceFiles}
           objective={state.objective}
           job={job}
           busy={state.busy !== null}
-          opening={state.busy === "open"}
           submitting={state.busy === "create" || state.busy === "ingest"}
           error={error}
           onFieldChange={onFieldChange}
-          onChooseLocation={onChooseLocation}
-          onOpenWorkspace={onOpenWorkspace}
+          onChooseHome={onChooseHome}
           onRegisterDocument={onRegisterDocument}
           onDocumentError={onDocumentError}
           onSubmit={onSubmit}
@@ -551,8 +548,8 @@ function workflowReducer(
       return { ...state, busy: null }
     case "operation-failed":
       return { ...state, busy: null, error: action.message }
-    case "location-selected":
-      return { ...state, selection: action.selection, busy: null }
+    case "home-selected":
+      return { ...state, home: action.home, busy: null }
     case "document-selected":
       return {
         ...state,
@@ -563,7 +560,6 @@ function workflowReducer(
         error: undefined,
       }
     case "workspace-created":
-    case "workspace-opened":
       return {
         ...state,
         workspace: action.workspace,
@@ -639,13 +635,11 @@ function WorkspaceSwitcher({
   activeWorkspaceId,
   busy,
   onActivate,
-  onOpen,
 }: {
   workspaces: readonly WorkspaceListItem[]
   activeWorkspaceId?: string
   busy: boolean
   onActivate: (workspaceId: string) => void
-  onOpen: () => void
 }) {
   return (
     <div className="mb-8 flex flex-col gap-3 rounded-lg border bg-card p-3 text-card-foreground sm:flex-row sm:items-center sm:justify-between">
@@ -665,10 +659,6 @@ function WorkspaceSwitcher({
           ))}
         </select>
       </label>
-      <Button type="button" variant="outline" disabled={busy} onClick={onOpen}>
-        {busy ? <Spinner data-icon="inline-start" /> : null}
-        Open workspace
-      </Button>
     </div>
   )
 }

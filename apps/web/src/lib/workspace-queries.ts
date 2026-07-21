@@ -7,12 +7,14 @@ import type {
   WikiIngestJob,
   WikiSearchInput,
   WikiSearchResult,
+  WorkspaceHome,
   WorkspaceListItem,
   WorkspaceSummary,
 } from "@workspace/contract"
 
 export const providerStatusKey = ["providers", "status"] as const
 export const workspaceCurrentKey = ["workspace", "current"] as const
+export const workspaceHomeKey = ["workspace", "home"] as const
 export const workspacesKey = ["workspaces"] as const
 export const workspaceIngestKey = (workspaceId: string) =>
   ["workspace", workspaceId, "ingest", "current"] as const
@@ -33,6 +35,18 @@ export async function readCurrentWorkspace(
   return unwrapResult(await api.workspaces.current())
 }
 
+export async function readWorkspaceHome(
+  api: AmendApi
+): Promise<WorkspaceHome | null> {
+  return unwrapResult(await api.workspaces.home())
+}
+
+export async function chooseWorkspaceHome(
+  api: AmendApi
+): Promise<WorkspaceHome | null> {
+  return unwrapResult(await api.workspaces.chooseHome())
+}
+
 export async function listWorkspaces(
   api: AmendApi
 ): Promise<readonly WorkspaceListItem[]> {
@@ -44,12 +58,6 @@ export async function activateWorkspaceById(
   workspaceId: string
 ): Promise<WorkspaceSummary> {
   return unwrapResult(await api.workspaces.activate({ workspaceId }))
-}
-
-export async function openExistingWorkspace(
-  api: AmendApi
-): Promise<WorkspaceSummary | null> {
-  return unwrapResult(await api.workspaces.open())
 }
 
 export async function readCurrentIngest(

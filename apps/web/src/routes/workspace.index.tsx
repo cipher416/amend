@@ -23,7 +23,9 @@ function WorkspaceIndexRoute() {
     queryClient
   )
 
-  if (desktop === null || currentWorkspace.data === null) return <Navigate to="/" />
+  if (desktop === null || currentWorkspace.data === null) {
+    return <Navigate to="/" search={{ createWorkspace: false }} />
+  }
   if (currentWorkspace.error) {
     return (
       <main className="grid min-h-svh place-items-center bg-background p-6 text-foreground">

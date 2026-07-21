@@ -1,6 +1,7 @@
 import type {
   SourceDocumentSelection,
   WikiIngestJob,
+  WorkspaceHome,
   WorkspaceSummary,
 } from "@workspace/contract"
 import {
@@ -37,18 +38,16 @@ export function WikiSetupStep({
   workspace,
   wikiName,
   domain,
-  location,
+  home,
   document,
   sourceFiles,
   objective,
   job,
   busy,
-  opening,
   submitting,
   error,
   onFieldChange,
-  onChooseLocation,
-  onOpenWorkspace,
+  onChooseHome,
   onRegisterDocument,
   onDocumentError,
   onSubmit,
@@ -57,21 +56,19 @@ export function WikiSetupStep({
   workspace?: WorkspaceSummary
   wikiName: string
   domain: string
-  location?: string
+  home?: WorkspaceHome
   document?: SourceDocumentSelection
   sourceFiles?: File[]
   objective: string
   job?: WikiIngestJob
   busy: boolean
-  opening: boolean
   submitting: boolean
   error?: string
   onFieldChange: (
     field: "wikiName" | "domain" | "objective",
     value: string
   ) => void
-  onChooseLocation: () => void
-  onOpenWorkspace: () => void
+  onChooseHome: () => void
   onRegisterDocument: (file: File) => void
   onDocumentError: (message: string) => void
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
@@ -118,6 +115,7 @@ export function WikiSetupStep({
   }
 
   const workspaceLocked = workspace !== undefined
+  const sourceReady = workspaceLocked || Boolean(home && wikiName && domain)
 
   return (
     <form className="py-2 sm:py-4" onSubmit={onSubmit}>
@@ -140,18 +138,6 @@ export function WikiSetupStep({
             >
               Workspace
             </h2>
-            {!workspaceLocked ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={onOpenWorkspace}
-              >
-                {opening ? <Spinner data-icon="inline-start" /> : null}
-                {opening ? "Opening" : "Open existing workspace"}
-              </Button>
-            ) : null}
           </div>
           <div className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -159,6 +145,8 @@ export function WikiSetupStep({
                 <FieldLabel htmlFor="wiki-name">Workspace name</FieldLabel>
                 <Input
                   id="wiki-name"
+                  name="workspace-name"
+                  autoComplete="off"
                   value={workspace?.name ?? wikiName}
                   onChange={(event) =>
                     onFieldChange("wikiName", event.target.value)
@@ -171,17 +159,19 @@ export function WikiSetupStep({
               </Field>
 
               <Field data-disabled={busy || workspaceLocked || undefined}>
-                <FieldLabel htmlFor="wiki-location">Parent location</FieldLabel>
+                <FieldLabel htmlFor="wiki-home">Amend home</FieldLabel>
                 <Button
-                  id="wiki-location"
+                  id="wiki-home"
                   type="button"
                   variant="outline"
                   disabled={busy || workspaceLocked}
-                  onClick={onChooseLocation}
+                  onClick={onChooseHome}
                   className="w-full justify-start"
                 >
                   <span className="truncate">
-                    {workspace?.displayPath ?? location ?? "Choose a folder"}
+                    {home?.displayPath ??
+                      workspace?.displayPath ??
+                      "Choose Amend home"}
                   </span>
                 </Button>
               </Field>
@@ -191,6 +181,8 @@ export function WikiSetupStep({
               <FieldLabel htmlFor="wiki-domain">Domain</FieldLabel>
               <Textarea
                 id="wiki-domain"
+                name="workspace-domain"
+                autoComplete="off"
                 value={workspace?.domain ?? domain}
                 onChange={(event) =>
                   onFieldChange("domain", event.target.value)
@@ -215,11 +207,11 @@ export function WikiSetupStep({
             Source
           </h2>
           <div className="flex flex-col gap-4">
-            <Field data-disabled={busy || undefined}>
+            <Field data-disabled={busy || !sourceReady || undefined}>
               <FieldLabel htmlFor="source-document">First document</FieldLabel>
               <Dropzone
                 id="source-document"
-                disabled={busy}
+                disabled={busy || !sourceReady}
                 accept={documentAccept}
                 maxFiles={1}
                 maxSize={25 * 1024 * 1024}
@@ -248,6 +240,8 @@ export function WikiSetupStep({
               <FieldLabel htmlFor="source-objective">What matters?</FieldLabel>
               <Textarea
                 id="source-objective"
+                name="source-objective"
+                autoComplete="off"
                 value={objective}
                 onChange={(event) =>
                   onFieldChange("objective", event.target.value)
@@ -280,7 +274,7 @@ export function WikiSetupStep({
           disabled={
             busy ||
             !document ||
-            (!workspaceLocked && (!location || !wikiName || !domain))
+            (!workspaceLocked && (!home || !wikiName || !domain))
           }
         >
           {submitting ? <Spinner data-icon="inline-start" /> : null}
