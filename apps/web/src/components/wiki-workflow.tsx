@@ -17,6 +17,7 @@ import { Button } from "@workspace/ui/components/button"
 import { Spinner } from "@workspace/ui/components/spinner"
 
 import { errorMessage, useAmendApi } from "@/lib/amend-client"
+import { projectWorkspaceIngestChanged } from "@/lib/workspace-ingest-events"
 import {
   listWorkspaces,
   providerStatusKey,
@@ -174,9 +175,7 @@ export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
   const queriedJob = currentIngest.data ?? undefined
   const workspace = state.workspace ?? queriedWorkspace
   const job =
-    queriedJob && !isOlderJob(queriedJob, state.job)
-      ? queriedJob
-      : state.job
+    queriedJob && !isOlderJob(queriedJob, state.job) ? queriedJob : state.job
   const piConfigured =
     state.piConfigured ?? providerStatus.data?.configured ?? false
   const knownWorkspaces = workspaces.data ?? []
@@ -185,30 +184,8 @@ export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
   useEffect(() => {
     if (!desktop) return
     const unsubscribe = desktop.wiki.onIngestChanged((event) => {
-      queryClient.setQueryData<readonly WorkspaceListItem[]>(
-        workspacesKey,
-        (items) =>
-          items?.map((item) =>
-            item.id === event.workspaceId
-              ? { ...item, running: event.job.status === "running" }
-              : item
-          )
-      )
+      projectWorkspaceIngestChanged(queryClient, event)
       if (event.workspaceId === activeWorkspaceId) {
-        queryClient.setQueryData(workspaceIngestKey(activeWorkspaceId), event.job)
-        if (event.job.status === "completed" && event.job.result) {
-          queryClient.setQueryData<WorkspaceSummary | null>(
-            workspaceCurrentKey,
-            (current) =>
-              current
-                ? {
-                    ...current,
-                    commitHash: event.job.result?.commitHash ?? current.commitHash,
-                    setupStatus: "ready",
-                  }
-                : current
-          )
-        }
         dispatch({ type: "ingest-changed", event })
       }
     })
@@ -217,10 +194,10 @@ export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
 
   const recovering = Boolean(
     desktop &&
-      (providerStatus.isPending ||
-        currentWorkspace.isPending ||
-        workspaces.isPending ||
-        (Boolean(currentWorkspaceId) && currentIngest.isPending))
+    (providerStatus.isPending ||
+      currentWorkspace.isPending ||
+      workspaces.isPending ||
+      (Boolean(currentWorkspaceId) && currentIngest.isPending))
   )
   if (desktop === undefined || recovering) {
     return <OpeningScreen />
@@ -255,7 +232,9 @@ export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
       knownWorkspaces={knownWorkspaces}
       job={job}
       error={error}
-      onActivateWorkspace={(workspaceId) => void actions.activateWorkspace(workspaceId)}
+      onActivateWorkspace={(workspaceId) =>
+        void actions.activateWorkspace(workspaceId)
+      }
       onOpenWorkspace={() => void actions.openWorkspace()}
       onProviderConnected={() => {
         queryClient.setQueryData(providerStatusKey, { configured: true })
@@ -265,7 +244,9 @@ export function WikiWorkflow({ readyElement }: { readyElement?: ReactNode }) {
       onFieldChange={actions.changeField}
       onChooseLocation={() => void actions.chooseLocation()}
       onRegisterDocument={(file) => void actions.registerDocument(file)}
-      onDocumentError={(message) => dispatch({ type: "operation-failed", message })}
+      onDocumentError={(message) =>
+        dispatch({ type: "operation-failed", message })
+      }
       onSubmit={(event) => void actions.createWiki(event)}
       onCancel={() => void actions.cancelIngest()}
     />
@@ -286,7 +267,10 @@ function useWikiWorkflowActions({
       try {
         const response = await api.workspaces.chooseLocation()
         if (!response.ok) {
-          dispatch({ type: "operation-failed", message: response.error.message })
+          dispatch({
+            type: "operation-failed",
+            message: response.error.message,
+          })
         } else if (response.value) {
           dispatch({ type: "location-selected", selection: response.value })
         } else {
@@ -301,7 +285,10 @@ function useWikiWorkflowActions({
       try {
         const response = await api.workspaces.open()
         if (!response.ok) {
-          dispatch({ type: "operation-failed", message: response.error.message })
+          dispatch({
+            type: "operation-failed",
+            message: response.error.message,
+          })
         } else if (response.value) {
           queryClient.setQueryData(workspaceCurrentKey, response.value)
           void queryClient.invalidateQueries({ queryKey: workspacesKey })
@@ -318,7 +305,10 @@ function useWikiWorkflowActions({
       try {
         const response = await api.wiki.registerDocument(file)
         if (!response.ok) {
-          dispatch({ type: "operation-failed", message: response.error.message })
+          dispatch({
+            type: "operation-failed",
+            message: response.error.message,
+          })
         } else {
           dispatch({
             type: "document-selected",
@@ -357,7 +347,10 @@ function useWikiWorkflowActions({
             domain: state.domain,
           })
           if (!response.ok) {
-            dispatch({ type: "operation-failed", message: response.error.message })
+            dispatch({
+              type: "operation-failed",
+              message: response.error.message,
+            })
             return
           }
           targetWorkspace = response.value
@@ -377,7 +370,10 @@ function useWikiWorkflowActions({
           objective: state.objective,
         })
         if (!response.ok) {
-          dispatch({ type: "operation-failed", message: response.error.message })
+          dispatch({
+            type: "operation-failed",
+            message: response.error.message,
+          })
           return
         }
         dispatch({ type: "ingest-started" })
@@ -402,7 +398,10 @@ function useWikiWorkflowActions({
       try {
         const response = await api.workspaces.activate({ workspaceId })
         if (!response.ok) {
-          dispatch({ type: "operation-failed", message: response.error.message })
+          dispatch({
+            type: "operation-failed",
+            message: response.error.message,
+          })
           return
         }
         queryClient.setQueryData(workspaceCurrentKey, response.value)
@@ -426,7 +425,10 @@ function useWikiWorkflowActions({
       try {
         const response = await api.wiki.cancelIngest({ jobId: job.id })
         if (!response.ok) {
-          dispatch({ type: "operation-failed", message: response.error.message })
+          dispatch({
+            type: "operation-failed",
+            message: response.error.message,
+          })
         }
       } catch (cause) {
         dispatch({ type: "operation-failed", message: errorMessage(cause) })
@@ -437,7 +439,10 @@ function useWikiWorkflowActions({
       try {
         const response = await api.wiki.refreshIndex()
         if (!response.ok) {
-          dispatch({ type: "operation-failed", message: response.error.message })
+          dispatch({
+            type: "operation-failed",
+            message: response.error.message,
+          })
           return
         }
         dispatch({

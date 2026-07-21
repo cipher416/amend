@@ -1,11 +1,5 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router"
-
-import { WorkspaceApp } from "@/components/workspace-app"
+import { Outlet, createFileRoute } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/workspace")({
-  component: WorkspaceRoute,
+  component: Outlet,
 })
-
-function WorkspaceRoute() {
-  return <WorkspaceApp noWorkspaceElement={<Navigate to="/" />} />
-}

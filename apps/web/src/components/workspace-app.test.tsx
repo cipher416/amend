@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient } from "@tanstack/react-query"
 import type {
@@ -28,8 +28,7 @@ const routeHarness = vi.hoisted(() => ({
   queryClient: undefined as QueryClient | undefined,
   renderOutlet: undefined as undefined | (() => ReactNode),
   navigate: undefined as
-    | undefined
-    | ((workspaceId: string, filePath?: string) => void),
+    undefined | ((workspaceId: string, filePath?: string) => void),
 }))
 
 interface MockRouteParams {
@@ -72,23 +71,10 @@ vi.mock("@tanstack/react-router", () => ({
       },
     },
   }),
-  useRouterState: <T,>({
-    select,
-  }: {
-    select: (state: {
-      matches: Array<{ params: { workspaceId?: string; _splat?: string } }>
-    }) => T
-  }) =>
-    select({
-      matches: [
-        {
-          params: {
-            workspaceId: routeHarness.workspaceId,
-            _splat: routeHarness.filePath,
-          },
-        },
-      ],
-    }),
+  useParams: () => ({
+    workspaceId: routeHarness.workspaceId,
+    _splat: routeHarness.filePath,
+  }),
 }))
 
 vi.mock("@workspace/ui/components/button", () => ({
@@ -100,6 +86,34 @@ vi.mock("@workspace/ui/components/button", () => ({
     variant?: string
     size?: string
   }) => <button {...props} />,
+}))
+
+vi.mock("@workspace/ui/components/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DropdownMenuTrigger: ({
+    render: _render,
+    children,
+    ...props
+  }: ButtonHTMLAttributes<HTMLButtonElement> & {
+    render?: ReactNode
+  }) => <button {...props}>{children}</button>,
+  DropdownMenuContent: ({ children }: { children: ReactNode }) => (
+    <div role="menu">{children}</div>
+  ),
+  DropdownMenuLabel: ({ children }: { children: ReactNode }) => (
+    <span>{children}</span>
+  ),
+  DropdownMenuRadioGroup: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DropdownMenuRadioItem: ({
+    children,
+  }: {
+    children: ReactNode
+    value: string
+  }) => <button role="menuitemradio">{children}</button>,
 }))
 
 beforeEach(() => {
@@ -132,7 +146,11 @@ describe("workspace app", () => {
     })
 
     await screen.findByRole("link", { name: "write-ahead-logging.md" })
-    await screen.findByText("# Write-ahead logging")
+    await screen.findByRole("heading", { name: "Write-ahead logging" })
+    await screen.findByText("Created 2026-07-20")
+    await screen.findByText("storage")
+    await screen.findByRole("link", { name: "raw/papers/paper.md" })
+    expect(screen.queryByText("title: Write-Ahead Logging")).toBeNull()
     await user.click(screen.getByRole("link", { name: "paper.pdf" }))
 
     await screen.findByText("Preview unavailable")
@@ -143,7 +161,8 @@ describe("workspace app", () => {
     expect(api.wiki.readFile).toHaveBeenCalledWith({ path: "paper.pdf" })
   })
 
-  it("keeps workspace running badges fresh from ingest events", async () => {
+  it("navigates wikilinks inside Markdown and opens external links separately", async () => {
+    const user = userEvent.setup()
     const api = createDesktopApi()
     window.amend = api
 
@@ -152,7 +171,64 @@ describe("workspace app", () => {
       initialFilePath: "concepts/write-ahead-logging.md",
     })
 
-    await screen.findByRole("option", { name: "Archive Wiki - running" })
+    const wikiLink = await screen.findByRole("link", { name: "checkpointing" })
+    expect(wikiLink.getAttribute("href")).toBe(
+      "/workspace/workspace-id/concepts/checkpointing.md"
+    )
+    expect(screen.getByRole("link", { name: "Reference" })).toHaveProperty(
+      "target",
+      "_blank"
+    )
+
+    await user.click(screen.getByRole("button", { name: "concepts" }))
+    expect(screen.queryByRole("link", { name: "checkpointing.md" })).toBeNull()
+
+    await user.click(wikiLink)
+
+    await screen.findByRole("heading", { name: "Checkpointing" })
+    await screen.findByRole("link", { name: "checkpointing.md" })
+    expect(api.wiki.readFile).toHaveBeenCalledWith({
+      path: "concepts/checkpointing.md",
+    })
+  })
+
+  it("expands and collapses workspace folders", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+
+    const folder = await screen.findByRole("button", { name: "concepts" })
+    expect(
+      screen.queryByRole("link", { name: "write-ahead-logging.md" })
+    ).toBeNull()
+
+    await user.click(folder)
+    await screen.findByRole("link", { name: "write-ahead-logging.md" })
+
+    await user.click(folder)
+    expect(
+      screen.queryByRole("link", { name: "write-ahead-logging.md" })
+    ).toBeNull()
+  })
+
+  it("keeps workspace running badges fresh from ingest events", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWorkspaceApp(api, {
+      initialWorkspaceId: workspaceSummary.id,
+      initialFilePath: "concepts/write-ahead-logging.md",
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Reliability Wiki" })
+    )
+    const archiveWorkspace = (await screen.findAllByRole("menuitemradio"))[1]
+    expect(archiveWorkspace.textContent).toContain("Running")
+    await waitFor(() => expect(api.wiki.onIngestChanged).toHaveBeenCalledOnce())
     await act(() => {
       api.emitIngestChanged({
         workspaceId: archiveWorkspaceSummary.id,
@@ -186,10 +262,34 @@ describe("workspace app", () => {
       })
     })
 
-    expect(screen.getByRole("option", { name: "Archive Wiki" })).toBeDefined()
-    expect(
-      screen.queryByRole("option", { name: "Archive Wiki - running" })
-    ).toBeNull()
+    await waitFor(() =>
+      expect(screen.getAllByRole("menuitemradio")[1].textContent).not.toContain(
+        "Running"
+      )
+    )
+  })
+
+  it("does not read a file when the route workspace cannot be activated", async () => {
+    const api = createDesktopApi()
+    vi.mocked(api.workspaces.activate).mockResolvedValue({
+      ok: false,
+      error: {
+        code: "workspace-open-failed",
+        message: "Workspace unavailable",
+      },
+    })
+
+    renderWorkspaceApp(api, {
+      initialWorkspaceId: "unavailable-workspace",
+      initialFilePath: "concepts/write-ahead-logging.md",
+    })
+
+    await waitFor(() =>
+      expect(api.workspaces.activate).toHaveBeenCalledWith({
+        workspaceId: "unavailable-workspace",
+      })
+    )
+    expect(api.wiki.readFile).not.toHaveBeenCalled()
   })
 })
 
@@ -215,8 +315,15 @@ function renderWorkspaceApp(
       setFilePath(nextFilePath)
     }
     routeHarness.renderOutlet = () =>
-      filePath ? <WorkspaceFileContent /> : <WorkspaceEmptyContent />
-    return <WorkspaceApp />
+      filePath ? (
+        <WorkspaceFileContent
+          workspaceId={workspaceId ?? workspaceSummary.id}
+          filePath={filePath}
+        />
+      ) : (
+        <WorkspaceEmptyContent />
+      )
+    return <WorkspaceApp workspaceId={workspaceId ?? workspaceSummary.id} />
   }
 
   const queryClient = new QueryClient({
@@ -305,6 +412,11 @@ function createDesktopApi(): MockAmendApi {
                 name: "write-ahead-logging.md",
                 kind: "file",
               },
+              {
+                path: "concepts/checkpointing.md",
+                name: "checkpointing.md",
+                kind: "file",
+              },
             ],
           },
           { path: "paper.pdf", name: "paper.pdf", kind: "file" },
@@ -315,18 +427,27 @@ function createDesktopApi(): MockAmendApi {
         const file: WikiFileContent =
           path === "paper.pdf"
             ? {
-              path,
-              name: "paper.pdf",
-              mediaType: "binary",
-              size: 9,
-            }
-            : {
-              path,
-              name: "write-ahead-logging.md",
-              mediaType: "markdown",
-              size: 21,
-              content: "# Write-ahead logging",
-            }
+                path,
+                name: "paper.pdf",
+                mediaType: "binary",
+                size: 9,
+              }
+            : path === "concepts/checkpointing.md"
+              ? {
+                  path,
+                  name: "checkpointing.md",
+                  mediaType: "markdown",
+                  size: 17,
+                  content: "# Checkpointing",
+                }
+              : {
+                  path,
+                  name: "write-ahead-logging.md",
+                  mediaType: "markdown",
+                  size: 190,
+                  content:
+                    "---\ntitle: Write-Ahead Logging\ncreated: 2026-07-20\nupdated: 2026-07-20\ntype: concept\ntags:\n  - storage\nsources:\n  - raw/papers/paper.md\n---\n\n# Write-ahead logging\n\nSee [[checkpointing]].\n\n[Reference](https://example.com/workspace/other/page).",
+                }
         return success(file)
       }),
       search: vi.fn(async () => success([])),

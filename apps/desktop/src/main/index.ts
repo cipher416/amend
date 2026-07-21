@@ -1,7 +1,7 @@
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { app, BrowserWindow, session } from "electron"
+import { app, BrowserWindow, session, shell } from "electron"
 
 import { registerPiIpc, registerWikiIpc } from "./ipc"
 import { PiCredentialService } from "./pi-credential-service"
@@ -41,7 +41,12 @@ function createWindow() {
     ? rendererOrigin
     : new URL(rendererUrl).origin
 
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalUrl(url)) {
+      void shell.openExternal(url).catch(() => undefined)
+    }
+    return { action: "deny" }
+  })
   window.webContents.on("will-navigate", (event, navigationUrl) => {
     if (!isAllowedNavigation(navigationUrl, allowedOrigin)) {
       event.preventDefault()
@@ -84,6 +89,14 @@ function createWindow() {
   mainWindow = window
 
   return window
+}
+
+function isExternalUrl(url: string): boolean {
+  try {
+    return ["http:", "https:", "mailto:"].includes(new URL(url).protocol)
+  } catch {
+    return false
+  }
 }
 
 app.whenReady().then(async () => {
