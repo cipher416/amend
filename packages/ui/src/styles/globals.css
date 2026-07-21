@@ -132,11 +132,13 @@
   }
 }
 
-::highlight(workspace-file-search) {
+::highlight(wiki-file-search),
+mark[data-wiki-file-search-highlight="match"] {
   background: color-mix(in oklch, var(--primary) 16%, transparent);
 }
 
-::highlight(workspace-file-search-current) {
+::highlight(wiki-file-search-current),
+mark[data-wiki-file-search-highlight="current"] {
   background: var(--primary);
   color: var(--primary-foreground);
 }

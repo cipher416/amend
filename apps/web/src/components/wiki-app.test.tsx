@@ -461,6 +461,14 @@ describe("wiki app", () => {
     const findInput = await screen.findByPlaceholderText("Find in this file")
     await user.type(findInput, "Welcome")
     await screen.findByText("1/2")
+    expect(
+      document.querySelectorAll("mark[data-wiki-file-search-highlight]")
+    ).toHaveLength(2)
+    expect(
+      document.querySelectorAll(
+        'mark[data-wiki-file-search-highlight="current"]'
+      )
+    ).toHaveLength(1)
 
     await user.keyboard("{ArrowDown}")
     await screen.findByText("2/2")

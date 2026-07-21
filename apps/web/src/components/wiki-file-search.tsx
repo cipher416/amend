@@ -58,6 +58,7 @@ export function WikiFileSearch({
   }, [open])
 
   useEffect(() => {
+    clearHighlights()
     const nextMatches = query ? findTextMatches(contentRef.current, query) : []
     setMatches(nextMatches)
     setCurrentMatch(0)
@@ -226,12 +227,15 @@ type HighlightRegistry = {
 type HighlightConstructor = new (...ranges: Range[]) => Set<Range>
 
 function updateHighlights(matches: readonly Range[], currentMatch: number) {
-  const registry = getHighlightRegistry()
-  const Highlight = getHighlightConstructor()
-  if (!registry || !Highlight) return
-
   clearHighlights()
   if (!matches.length) return
+
+  const registry = getHighlightRegistry()
+  const Highlight = getHighlightConstructor()
+  if (!registry || !Highlight) {
+    applyFallbackHighlights(matches, currentMatch)
+    return
+  }
 
   const current = matches[currentMatch % matches.length]
   registry.set(allMatchesHighlight, new Highlight(...matches))
@@ -242,6 +246,37 @@ function clearHighlights() {
   const registry = getHighlightRegistry()
   registry?.delete(allMatchesHighlight)
   registry?.delete(currentMatchHighlight)
+  clearFallbackHighlights()
+}
+
+function applyFallbackHighlights(
+  matches: readonly Range[],
+  currentMatch: number
+) {
+  const activeMatch = currentMatch % matches.length
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    const mark = document.createElement("mark")
+    mark.dataset.wikiFileSearchHighlight =
+      index === activeMatch ? "current" : "match"
+    try {
+      matches[index].surroundContents(mark)
+    } catch {
+      mark.remove()
+    }
+  }
+}
+
+function clearFallbackHighlights() {
+  const parents = new Set<Node>()
+  for (const mark of document.querySelectorAll<HTMLElement>(
+    "mark[data-wiki-file-search-highlight]"
+  )) {
+    const parent = mark.parentNode
+    if (!parent) continue
+    parent.replaceChild(document.createTextNode(mark.textContent), mark)
+    parents.add(parent)
+  }
+  for (const parent of parents) parent.normalize()
 }
 
 function getHighlightRegistry(): HighlightRegistry | undefined {
