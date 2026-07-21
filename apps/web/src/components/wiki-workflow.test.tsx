@@ -227,8 +227,12 @@ describe("Pi connection gate", () => {
     await user.click(
       screen.getByRole("button", { name: "Or connect with an API key" })
     )
-    await screen.findByLabelText("Provider")
-    await user.selectOptions(screen.getByLabelText("Provider"), "zai")
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    const providerSearch = await screen.findByPlaceholderText(
+      "Search providers..."
+    )
+    expect(document.activeElement).toBe(providerSearch)
+    await user.keyboard("{ArrowDown}{Enter}")
     await user.type(screen.getByLabelText("API key"), "sk-test-key")
     await user.click(screen.getByRole("button", { name: "Save and continue" }))
 

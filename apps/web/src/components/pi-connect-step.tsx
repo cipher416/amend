@@ -432,23 +432,12 @@ function ApiKeyStep({
     <form className="flex flex-col gap-4" onSubmit={onSubmit}>
       <Field>
         <FieldLabel htmlFor="pi-api-key-provider">Provider</FieldLabel>
-        <select
-          id="pi-api-key-provider"
-          aria-label="Provider"
-          className="h-7 w-full rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+        <ProviderPicker
+          providers={state.apiKeyProviders ?? []}
           value={state.apiKeyProvider ?? ""}
-          onChange={(event) => onProviderChange(event.target.value)}
-          required
-        >
-          <option value="" disabled>
-            Choose a provider
-          </option>
-          {state.apiKeyProviders?.map((provider) => (
-            <option key={provider.id} value={provider.id}>
-              {provider.name}
-            </option>
-          ))}
-        </select>
+          disabled={state.busy}
+          onChange={onProviderChange}
+        />
       </Field>
 
       <Field>
@@ -538,10 +527,73 @@ export function ModelPicker({
   disabled: boolean
   onChange: (model: string) => void
 }) {
+  return (
+    <CommandPicker
+      id="pi-default-model"
+      label="Default model"
+      placeholder="Choose a model"
+      searchPlaceholder="Search models..."
+      emptyLabel="No models found."
+      options={models}
+      value={value}
+      disabled={disabled}
+      onChange={onChange}
+    />
+  )
+}
+
+function ProviderPicker({
+  providers,
+  value,
+  disabled,
+  onChange,
+}: {
+  providers: readonly PiProviderSummary[]
+  value: string
+  disabled: boolean
+  onChange: (provider: string) => void
+}) {
+  return (
+    <CommandPicker
+      id="pi-api-key-provider"
+      label="Provider"
+      placeholder="Choose a provider"
+      searchPlaceholder="Search providers..."
+      emptyLabel="No providers found."
+      options={providers}
+      value={value}
+      disabled={disabled}
+      onChange={onChange}
+    />
+  )
+}
+
+function CommandPicker({
+  id,
+  label,
+  placeholder,
+  searchPlaceholder,
+  emptyLabel,
+  options,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string
+  label: string
+  placeholder: string
+  searchPlaceholder: string
+  emptyLabel: string
+  options: readonly PiModelSummary[] | readonly PiProviderSummary[]
+  value?: string
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const selected = models.find((model) => model.id === value)
+  const selected = options.find((option) => option.id === value)
+  const listId = `${id}-list`
 
   useEffect(() => {
     if (open) inputRef.current?.focus()
@@ -556,13 +608,13 @@ export function ModelPicker({
     <div className="relative">
       <Button
         ref={triggerRef}
-        id="pi-default-model"
+        id={id}
         type="button"
         variant="outline"
         role="combobox"
-        aria-label="Default model"
+        aria-label={label}
         aria-expanded={open}
-        aria-controls={open ? "pi-default-model-list" : undefined}
+        aria-controls={open ? listId : undefined}
         aria-haspopup="listbox"
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
@@ -574,7 +626,7 @@ export function ModelPicker({
         }}
         className="w-full justify-between"
       >
-        <span className="truncate">{selected?.name ?? "Choose a model"}</span>
+        <span className="truncate">{selected?.name ?? placeholder}</span>
         <HugeiconsIcon icon={ArrowDown01Icon} data-icon="inline-end" />
       </Button>
       {open ? (
@@ -587,26 +639,26 @@ export function ModelPicker({
               }
             }}
           >
-            <CommandInput ref={inputRef} placeholder="Search models..." />
-            <CommandList id="pi-default-model-list">
-              <CommandEmpty>No models found.</CommandEmpty>
+            <CommandInput ref={inputRef} placeholder={searchPlaceholder} />
+            <CommandList id={listId}>
+              <CommandEmpty>{emptyLabel}</CommandEmpty>
               <CommandGroup>
-                {models.map((model) => (
+                {options.map((option) => (
                   <CommandItem
-                    key={model.id}
-                    value={`${model.name} ${model.id}`}
+                    key={option.id}
+                    value={`${option.name} ${option.id}`}
                     onSelect={() => {
-                      onChange(model.id)
+                      onChange(option.id)
                       close()
                     }}
                   >
-                    <span className="min-w-0 truncate">{model.name}</span>
+                    <span className="min-w-0 truncate">{option.name}</span>
                     <HugeiconsIcon
                       aria-hidden="true"
                       icon={Tick02Icon}
                       className={cn(
                         "ml-auto",
-                        value === model.id ? "opacity-100" : "opacity-0"
+                        value === option.id ? "opacity-100" : "opacity-0"
                       )}
                     />
                   </CommandItem>
