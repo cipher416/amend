@@ -58,49 +58,36 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
   })
 
   ipcMain.handle(
-    amendChannels.chooseWorkspaceLocation,
-    authorized(options, async (event) => {
-      const window = options.getWindow()
-      if (!window) return failure("unauthorized", "The window is unavailable.")
-      const selection = await dialog.showOpenDialog(window, {
-        title: "Choose where to create your wiki",
-        buttonLabel: "Choose location",
-        properties: ["openDirectory", "createDirectory"],
-      })
-      if (selection.canceled || !selection.filePaths[0]) return success(null)
-      return await attempt(async () =>
-        options.service.registerParentSelection(
-          event.sender.id,
-          selection.filePaths[0]
-        )
-      )
-    })
-  )
-
-  ipcMain.handle(
-    amendChannels.createWorkspace,
-    authorized(options, async (event, input: unknown) => {
-      if (!isCreateWorkspaceInput(input)) return invalidInput()
-      return await attempt(async () =>
-        options.service.createWorkspace(event.sender.id, input)
-      )
-    })
-  )
-
-  ipcMain.handle(
-    amendChannels.openWorkspace,
+    amendChannels.chooseWorkspaceHome,
     authorized(options, async () => {
       const window = options.getWindow()
       if (!window) return failure("unauthorized", "The window is unavailable.")
       const selection = await dialog.showOpenDialog(window, {
-        title: "Open an existing wiki",
-        buttonLabel: "Open workspace",
-        properties: ["openDirectory"],
+        title: "Choose your Amend home",
+        buttonLabel: "Choose Amend home",
+        properties: ["openDirectory", "createDirectory"],
       })
       if (selection.canceled || !selection.filePaths[0]) return success(null)
-      return await attempt(() =>
-        options.service.openWorkspace(selection.filePaths[0])
-      )
+      return await attempt(async () => {
+        await options.service.setWorkspaceHome(selection.filePaths[0])
+        return (await options.service.getWorkspaceHome())!
+      })
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.getWorkspaceHome,
+    authorized(
+      options,
+      async () => await attempt(async () => options.service.getWorkspaceHome())
+    )
+  )
+
+  ipcMain.handle(
+    amendChannels.createWorkspace,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isCreateWorkspaceInput(input)) return invalidInput()
+      return await attempt(async () => options.service.createWorkspace(input))
     })
   )
 
@@ -239,9 +226,9 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
   return () => {
     unsubscribeIngest()
     for (const channel of [
-      amendChannels.chooseWorkspaceLocation,
+      amendChannels.chooseWorkspaceHome,
+      amendChannels.getWorkspaceHome,
       amendChannels.createWorkspace,
-      amendChannels.openWorkspace,
       amendChannels.getCurrentWorkspace,
       amendChannels.listWorkspaces,
       amendChannels.activateWorkspace,

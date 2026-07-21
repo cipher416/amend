@@ -27,13 +27,11 @@ export interface AmendError {
 export type AmendResult<T> =
   { ok: true; value: T } | { ok: false; error: AmendError }
 
-export interface WorkspaceParentSelection {
-  token: string
+export interface WorkspaceHome {
   displayPath: string
 }
 
 export interface CreateWorkspaceInput {
-  selectionToken: string
   name: string
   domain: string
 }
@@ -267,11 +265,11 @@ export interface AmendApi {
     setTheme: (theme: ThemeSource) => Promise<AmendResult<null>>
   }
   readonly workspaces: {
-    chooseLocation: () => Promise<AmendResult<WorkspaceParentSelection | null>>
+    chooseHome: () => Promise<AmendResult<WorkspaceHome | null>>
+    home: () => Promise<AmendResult<WorkspaceHome | null>>
     create: (
       input: CreateWorkspaceInput
     ) => Promise<AmendResult<WorkspaceSummary>>
-    open: () => Promise<AmendResult<WorkspaceSummary | null>>
     current: () => Promise<AmendResult<WorkspaceSummary | null>>
     list: () => Promise<AmendResult<readonly WorkspaceListItem[]>>
     activate: (
@@ -360,7 +358,6 @@ const wikiFilePathSchema = Type.String({
 
 export const createWorkspaceInputSchema = Type.Object(
   {
-    selectionToken: selectionTokenSchema,
     name: workspaceNameSchema,
     domain: nonBlankText(2_000),
   },

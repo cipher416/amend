@@ -19,7 +19,7 @@ import type {
   WikiSearchResult,
   WikiTagFacet,
   WorkspaceListItem,
-  WorkspaceParentSelection,
+  WorkspaceHome,
   WorkspaceSummary,
 } from "./index.ts"
 
@@ -65,13 +65,12 @@ export function isAmendResult<T>(
 
 export const isNull: Guard<null> = (value): value is null => value === null
 
-export const isWorkspaceParentSelectionOrNull: Guard<
-  WorkspaceParentSelection | null
-> = (value): value is WorkspaceParentSelection | null =>
+export const isWorkspaceHomeOrNull: Guard<WorkspaceHome | null> = (
+  value
+): value is WorkspaceHome | null =>
   value === null ||
   (isRecord(value) &&
-    hasOnlyKeys(value, ["token", "displayPath"]) &&
-    isString(value.token) &&
+    hasOnlyKeys(value, ["displayPath"]) &&
     isString(value.displayPath))
 
 export const isWorkspaceSummary: Guard<WorkspaceSummary> = (

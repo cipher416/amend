@@ -17,8 +17,8 @@ import {
   isWikiIngestJobOrNull,
   isWikiSearchResults,
   isWikiTagFacets,
+  isWorkspaceHomeOrNull,
   isWorkspaceListItems,
-  isWorkspaceParentSelectionOrNull,
   isWorkspaceSummary,
   isWorkspaceSummaryOrNull,
 } from "@workspace/contract/guards"
@@ -41,19 +41,17 @@ import type {
   ThemeSource,
   WikiIngestChangedEvent,
   WikiSearchInput,
-  WorkspaceParentSelection,
+  WorkspaceHome,
 } from "@workspace/contract"
 import { contextBridge, ipcRenderer, webUtils } from "electron"
 
 const workspaces = Object.freeze({
-  chooseLocation: () =>
-    invoke<WorkspaceParentSelection | null>(
-      amendChannels.chooseWorkspaceLocation,
-      isWorkspaceParentSelectionOrNull
-    ),
+  chooseHome: () =>
+    invoke<WorkspaceHome | null>(amendChannels.chooseWorkspaceHome, isWorkspaceHomeOrNull),
+  home: () =>
+    invoke<WorkspaceHome | null>(amendChannels.getWorkspaceHome, isWorkspaceHomeOrNull),
   create: (input: CreateWorkspaceInput) =>
     invoke(amendChannels.createWorkspace, isWorkspaceSummary, input),
-  open: () => invoke(amendChannels.openWorkspace, isWorkspaceSummaryOrNull),
   current: () =>
     invoke(amendChannels.getCurrentWorkspace, isWorkspaceSummaryOrNull),
   list: () => invoke(amendChannels.listWorkspaces, isWorkspaceListItems),

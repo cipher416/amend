@@ -70,20 +70,17 @@ session, and can be cancelled until Git commit promotion begins.
 
 ## Workspace Lifecycle
 
-Each Amend workspace is a local Git repository with a stable ID stored in
-`.amend/workspace.json`. The desktop app also keeps a machine-local catalog in
-Electron `userData`, recording known workspace paths and the last active
-workspace. On launch, Amend restores the last active workspace when it is still
-valid; otherwise it starts without blocking the app.
+On first use, Amend asks for one library home. Every workspace is a sibling Git
+repository directly under that directory; the home also contains a hidden
+`.amend` directory for Amend's library metadata. Each workspace has a stable ID
+stored in its own `.amend/workspace.json`.
 
-Existing workspaces can be opened from the app. Older workspaces with a version 1
-manifest are migrated once by committing updated workspace metadata. The SQLite
-search index is a derived cache keyed by the stable workspace ID, so moving a
-workspace keeps its identity and causes the local index cache to be rebuilt when
-needed.
+The selected home and last active workspace ID live in Electron `userData`.
+Amend discovers workspaces by scanning the library home, then restores the last
+active workspace when it is still present. External repositories cannot be
+opened as workspaces.
 
-The app can switch between known workspaces in-app. Switching changes the active
-workspace for viewing and source selection, but it does not cancel a currently
-running ingest in another workspace. Ingest updates are tagged with the
-originating workspace ID so the renderer only applies them to the matching active
-workspace.
+The SQLite search index is a derived cache keyed by stable workspace ID. The app
+can switch between discovered sibling workspaces without cancelling an ingest in
+another workspace. Ingest updates are tagged with their originating workspace ID
+so the renderer only applies them to the matching active workspace.

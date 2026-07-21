@@ -1,7 +1,7 @@
 export const amendChannels = Object.freeze({
-  chooseWorkspaceLocation: "amend:workspaces:choose-location",
+  chooseWorkspaceHome: "amend:workspaces:choose-home",
+  getWorkspaceHome: "amend:workspaces:home",
   createWorkspace: "amend:workspaces:create",
-  openWorkspace: "amend:workspaces:open",
   getCurrentWorkspace: "amend:workspaces:current",
   listWorkspaces: "amend:workspaces:list",
   activateWorkspace: "amend:workspaces:activate",

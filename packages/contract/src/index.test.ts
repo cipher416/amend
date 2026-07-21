@@ -37,9 +37,9 @@ import {
 describe("desktop contract validation", () => {
   it("uses plural workspace and provider channel namespaces", () => {
     expect(amendChannels).toMatchObject({
-      chooseWorkspaceLocation: "amend:workspaces:choose-location",
+      chooseWorkspaceHome: "amend:workspaces:choose-home",
+      getWorkspaceHome: "amend:workspaces:home",
       createWorkspace: "amend:workspaces:create",
-      openWorkspace: "amend:workspaces:open",
       getCurrentWorkspace: "amend:workspaces:current",
       listWorkspaces: "amend:workspaces:list",
       activateWorkspace: "amend:workspaces:activate",
@@ -61,7 +61,6 @@ describe("desktop contract validation", () => {
   it("accepts valid workflow requests", () => {
     expect(
       isCreateWorkspaceInput({
-        selectionToken: "selection_1234567890",
         name: "AI Research",
         domain: "AI systems research",
       })
@@ -84,7 +83,6 @@ describe("desktop contract validation", () => {
   it("rejects paths, unknown fields, blank text, and unsafe filters", () => {
     expect(
       isCreateWorkspaceInput({
-        selectionToken: "selection_1234567890",
         name: "../escape",
         domain: "research",
       })
@@ -108,9 +106,9 @@ describe("desktop contract validation", () => {
       })
     ).toBe(false)
     expect(isReadWikiFileInput({ path: "" })).toBe(false)
-    expect(isReadWikiFileInput({ path: "concepts/cache.md", extra: true })).toBe(
-      false
-    )
+    expect(
+      isReadWikiFileInput({ path: "concepts/cache.md", extra: true })
+    ).toBe(false)
     expect(isThemeSource("auto")).toBe(false)
   })
 

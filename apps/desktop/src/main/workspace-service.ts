@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { lstat, readdir, readFile, realpath, rm } from "node:fs/promises"
+import { lstat, mkdir, readdir, readFile, realpath, rm } from "node:fs/promises"
 import { basename, extname, join, relative, resolve } from "node:path"
 
 import { isReadWikiFileInput } from "@workspace/contract"
@@ -22,7 +22,6 @@ import type {
   WikiSearchInput,
   WikiSearchResult,
   WikiTagFacet,
-  WorkspaceParentSelection,
   WorkspaceListItem,
   WorkspaceSummary,
 } from "@workspace/contract"
@@ -40,7 +39,7 @@ import {
 } from "@workspace/wiki-engine/workspace"
 import type { WikiWorkspace } from "@workspace/wiki-engine/workspace"
 
-import { WorkspaceCatalog } from "./workspace-catalog.ts"
+import { WorkspaceHome } from "./workspace-home.ts"
 
 interface ActiveWorkspace {
   summary: WorkspaceSummary
@@ -48,25 +47,12 @@ interface ActiveWorkspace {
   index: WikiIndex
 }
 
-interface ParentSelection {
-  ownerId: number
-  parentPath: string
-}
-
 interface SelectedDocument {
   ownerId: number
-  workspaceId?: string
   path: string
   displayName: string
   title: string
   extension: string
-}
-
-interface WorkspaceCatalogApi {
-  listWorkspaces: WorkspaceCatalog["listWorkspaces"]
-  findLastActiveWorkspace: WorkspaceCatalog["findLastActiveWorkspace"]
-  upsertAndActivate: WorkspaceCatalog["upsertAndActivate"]
-  clearLastActive: WorkspaceCatalog["clearLastActive"]
 }
 
 interface RunningIngest {
@@ -88,7 +74,6 @@ interface WorkspaceServiceOptions {
     workspacePath: string
     databasePath: string
   }) => Promise<WikiIndex>
-  catalog?: WorkspaceCatalogApi
   readWorkspace?: (input: { workspacePath: string }) => Promise<WikiWorkspace>
   migrateWorkspace?: (input: {
     workspacePath: string
@@ -109,8 +94,7 @@ export class WorkspaceService {
   private readonly options: WorkspaceServiceOptions
   private readonly createId: () => string
   private readonly now: () => Date
-  private readonly catalog: WorkspaceCatalogApi
-  private readonly selections = new Map<string, ParentSelection>()
+  private readonly home: WorkspaceHome
   private readonly documents = new Map<string, SelectedDocument>()
   private readonly contexts = new Map<string, ActiveWorkspace>()
   private readonly jobs = new Map<string, WikiIngestJob>()
@@ -127,9 +111,7 @@ export class WorkspaceService {
     this.options = options
     this.createId = options.createId ?? randomUUID
     this.now = options.now ?? (() => new Date())
-    this.catalog =
-      options.catalog ??
-      new WorkspaceCatalog({ userDataPath: options.userDataPath })
+    this.home = new WorkspaceHome({ userDataPath: options.userDataPath })
   }
 
   subscribeIngestChanged(
@@ -139,46 +121,41 @@ export class WorkspaceService {
     return () => this.jobListeners.delete(listener)
   }
 
-  async registerParentSelection(
-    ownerId: number,
-    parentPath: string
-  ): Promise<WorkspaceParentSelection> {
+  async setWorkspaceHome(parentPath: string): Promise<void> {
     this.assertOpen()
-    const canonicalParent = await realpath(resolve(parentPath)).catch(
-      (error) => {
-        throw new WorkspaceServiceError(
-          "invalid-location",
-          "The selected workspace location is not available.",
-          { cause: error }
-        )
-      }
-    )
-    for (const [token, selection] of this.selections) {
-      if (selection.ownerId === ownerId) this.selections.delete(token)
-    }
-    const token = tokenFromId(this.createId())
-    this.selections.set(token, { ownerId, parentPath: canonicalParent })
-    return { token, displayPath: canonicalParent }
+    const canonicalParent = await realpath(resolve(parentPath)).catch((error) => {
+      throw new WorkspaceServiceError(
+        "invalid-location",
+        "The selected Amend home is not available.",
+        { cause: error }
+      )
+    })
+    await mkdir(join(canonicalParent, ".amend"), { recursive: true })
+    await this.home.setParentPath(canonicalParent)
+  }
+
+  async getWorkspaceHome(): Promise<{ displayPath: string } | null> {
+    this.assertOpen()
+    const home = await this.home.read()
+    return home ? { displayPath: home.parentPath } : null
   }
 
   async createWorkspace(
-    ownerId: number,
     input: CreateWorkspaceInput
   ): Promise<WorkspaceSummary> {
     this.assertOpen()
     if (this.lifecycleOperation) {
       throw new WorkspaceServiceError("busy", "Amend is already working.")
     }
-    const selection = this.selections.get(input.selectionToken)
-    if (!selection || selection.ownerId !== ownerId) {
-      throw new WorkspaceServiceError(
-        "invalid-location",
-        "Choose the workspace location again."
-      )
-    }
-    this.selections.delete(input.selectionToken)
-    const workspacePath = join(selection.parentPath, input.name)
     const operation = Promise.resolve().then(async () => {
+      const home = await this.home.read()
+      if (!home) {
+        throw new WorkspaceServiceError(
+          "invalid-location",
+          "Choose an Amend home before creating a wiki."
+        )
+      }
+      const workspacePath = join(home.workspaceDirectory, input.name)
       await assertTargetDoesNotExist(workspacePath)
       return await this.initializeWorkspace(workspacePath, input)
     })
@@ -197,7 +174,6 @@ export class WorkspaceService {
     documentPath: string
   ): Promise<SourceDocumentSelection> {
     this.assertOpen()
-    const workspaceId = this.active?.summary.id
     const path = await realpath(resolve(documentPath)).catch((error) => {
       throw new WorkspaceServiceError(
         "invalid-input",
@@ -228,13 +204,9 @@ export class WorkspaceService {
     }
     const displayName = basename(path)
     const title = displayName.slice(0, -extension.length).trim() || "Document"
-    const token = tokenFromId(this.createId()).replace(
-      "selection_",
-      "document_"
-    )
+    const token = `document_${this.createId().replace(/[^a-zA-Z0-9_-]/g, "")}`
     this.documents.set(token, {
       ownerId,
-      ...(workspaceId ? { workspaceId } : {}),
       path,
       displayName,
       title,
@@ -250,13 +222,13 @@ export class WorkspaceService {
 
   async listWorkspaces(): Promise<readonly WorkspaceListItem[]> {
     this.assertOpen()
-    const records = await this.catalog.listWorkspaces()
-    return records.map((record) => ({
-      id: record.id,
-      name: basename(record.path) || record.path,
-      displayPath: record.path,
-      active: this.active?.summary.id === record.id,
-      running: this.jobs.get(record.id)?.status === "running",
+    const workspaces = await this.discoverWorkspaces()
+    return workspaces.map((workspace) => ({
+      id: workspace.id,
+      name: basename(workspace.path),
+      displayPath: workspace.path,
+      active: this.active?.summary.id === workspace.id,
+      running: this.jobs.get(workspace.id)?.status === "running",
     }))
   }
 
@@ -266,7 +238,7 @@ export class WorkspaceService {
       throw new WorkspaceServiceError("busy", "Amend is already working.")
     }
     const operation = Promise.resolve().then(async () => {
-      const record = (await this.catalog.listWorkspaces()).find(
+      const record = (await this.discoverWorkspaces()).find(
         ({ id }) => id === workspaceId
       )
       if (!record) {
@@ -311,20 +283,13 @@ export class WorkspaceService {
       throw new WorkspaceServiceError("busy", "Amend is already working.")
     }
     const operation = Promise.resolve().then(async () => {
-      let record
-      try {
-        record = await this.catalog.findLastActiveWorkspace()
-      } catch (error) {
-        console.error("[amend] failed to read the workspace catalog:", error)
-        return null
-      }
+      const home = await this.home.read()
+      if (!home?.lastActiveWorkspaceId) return null
+      const record = (await this.discoverWorkspaces()).find(
+        ({ id }) => id === home.lastActiveWorkspaceId
+      )
       if (!record) {
-        await this.catalog.clearLastActive().catch((error: unknown) => {
-          console.error(
-            "[amend] failed to clear an invalid active workspace record:",
-            error
-          )
-        })
+        await this.home.setLastActiveWorkspaceId(null)
         return null
       }
 
@@ -332,12 +297,7 @@ export class WorkspaceService {
         return await this.openAndActivateWorkspace(record.path, record.id)
       } catch (error) {
         console.error("[amend] failed to restore the last workspace:", error)
-        await this.catalog.clearLastActive().catch((clearError: unknown) => {
-          console.error(
-            "[amend] failed to clear the stale active workspace:",
-            clearError
-          )
-        })
+        await this.home.setLastActiveWorkspaceId(null)
         return null
       }
     })
@@ -366,12 +326,7 @@ export class WorkspaceService {
       throw new WorkspaceServiceError("busy", "Amend is already working.")
     }
     const document = this.documents.get(input.documentToken)
-    if (
-      !document ||
-      document.ownerId !== ownerId ||
-      (document.workspaceId !== undefined &&
-        document.workspaceId !== active.summary.id)
-    ) {
+    if (!document || document.ownerId !== ownerId) {
       throw new WorkspaceServiceError(
         "invalid-input",
         "Choose the source document again."
@@ -601,7 +556,6 @@ export class WorkspaceService {
     this.active = undefined
     this.contexts.clear()
     this.jobs.clear()
-    this.selections.clear()
     this.documents.clear()
     this.jobListeners.clear()
   }
@@ -730,11 +684,47 @@ export class WorkspaceService {
     }
   }
 
+  private async discoverWorkspaces(): Promise<
+    readonly { id: string; path: string }[]
+  > {
+    const home = await this.home.read()
+    if (!home) return []
+    let entries
+    try {
+      entries = await readdir(home.workspaceDirectory, { withFileTypes: true })
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") return []
+      throw error
+    }
+    const workspaces = await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory() && entry.name !== ".amend")
+        .map(async (entry) => {
+          const path = await realpath(join(home.workspaceDirectory, entry.name))
+          if (!isPathInside(home.workspaceDirectory, path)) return null
+          try {
+            const wiki = await this.readOrMigrateWorkspace(path)
+            return { id: wiki.id, path }
+          } catch {
+            return null
+          }
+        })
+    )
+    const discovered = workspaces
+      .filter((workspace): workspace is { id: string; path: string } =>
+        Boolean(workspace)
+      )
+    for (const context of this.contexts.values()) {
+      if (!isPathInside(home.workspaceDirectory, context.workspacePath)) continue
+      if (!discovered.some(({ id }) => id === context.summary.id)) {
+        discovered.push({ id: context.summary.id, path: context.workspacePath })
+      }
+    }
+    return discovered.sort((left, right) => left.path.localeCompare(right.path))
+  }
+
   private async setActiveWorkspace(candidate: ActiveWorkspace): Promise<void> {
-    await this.catalog.upsertAndActivate({
-      id: candidate.summary.id,
-      path: candidate.workspacePath,
-    })
+    await this.home.setLastActiveWorkspaceId(candidate.summary.id)
 
     const replaced = this.contexts.get(candidate.summary.id)
     this.contexts.set(candidate.summary.id, candidate)
@@ -1112,8 +1102,9 @@ function indexPath(userDataPath: string, workspaceId: string): string {
   return join(userDataPath, "indexes", `${workspaceId}.sqlite`)
 }
 
-function tokenFromId(id: string): string {
-  return `selection_${id.replace(/[^a-zA-Z0-9_-]/g, "")}`
+function isPathInside(parentPath: string, candidatePath: string): boolean {
+  const relativePath = relative(resolve(parentPath), candidatePath)
+  return relativePath !== "" && !relativePath.startsWith("..")
 }
 
 function jobIdFrom(id: string): string {
