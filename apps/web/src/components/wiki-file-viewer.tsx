@@ -172,9 +172,6 @@ function TableOfContents({
 
   return (
     <nav aria-label="Table of contents">
-      <p className="mb-3 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-        On this page
-      </p>
       <ScrollProvider containerRef={listRef}>
         <ol
           ref={listRef}
