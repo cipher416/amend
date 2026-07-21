@@ -1,7 +1,4 @@
-import type {
-  IngestPastedSourceResult,
-  WorkspaceSummary,
-} from "@workspace/contract"
+import type { IngestPastedSourceResult, WikiSummary } from "@workspace/contract"
 import {
   Alert,
   AlertDescription,
@@ -14,13 +11,13 @@ import { Spinner } from "@workspace/ui/components/spinner"
 import { WorkflowError } from "./wiki-workflow-ui"
 
 export function WikiReadyStep({
-  workspace,
+  wiki,
   ingest,
   refreshing,
   error,
   onRetryIndex,
 }: {
-  workspace?: WorkspaceSummary
+  wiki?: WikiSummary
   ingest?: IngestPastedSourceResult
   refreshing: boolean
   error?: string
@@ -43,13 +40,13 @@ export function WikiReadyStep({
       <div className="mt-8 flex flex-col gap-5 border-y py-5">
         <dl className="grid gap-3 text-xs sm:grid-cols-2">
           <div className="flex flex-col gap-1">
-            <dt className="text-muted-foreground">Workspace</dt>
-            <dd>{workspace?.displayPath ?? "Local workspace"}</dd>
+            <dt className="text-muted-foreground">Wiki</dt>
+            <dd>{wiki?.displayPath ?? "Local wiki"}</dd>
           </div>
           <div className="flex flex-col gap-1">
             <dt className="text-muted-foreground">Commit</dt>
             <dd className="font-mono">
-              {(ingest?.commitHash ?? workspace?.commitHash ?? "unknown").slice(
+              {(ingest?.commitHash ?? wiki?.commitHash ?? "unknown").slice(
                 0,
                 12
               )}

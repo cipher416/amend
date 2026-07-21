@@ -8,182 +8,178 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as WorkspaceRouteImport } from './routes/workspace'
-import { Route as WorkspaceIndexRouteImport } from './routes/workspace.index'
-import { Route as WorkspaceWorkspaceIdRouteImport } from './routes/workspace.$workspaceId'
-import { Route as WorkspaceWorkspaceIdIndexRouteImport } from './routes/workspace.$workspaceId.index'
-import { Route as WorkspaceWorkspaceIdSplatRouteImport } from './routes/workspace.$workspaceId.$'
+import { Route as rootRouteImport } from "./routes/__root"
+import { Route as IndexRouteImport } from "./routes/index"
+import { Route as WikiRouteImport } from "./routes/wiki"
+import { Route as WikiIndexRouteImport } from "./routes/wiki.index"
+import { Route as WikiWikiIdRouteImport } from "./routes/wiki.$wikiId"
+import { Route as WikiWikiIdIndexRouteImport } from "./routes/wiki.$wikiId.index"
+import { Route as WikiWikiIdSplatRouteImport } from "./routes/wiki.$wikiId.$"
 
 const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+  id: "/",
+  path: "/",
   getParentRoute: () => rootRouteImport,
 } as any)
-const WorkspaceRoute = WorkspaceRouteImport.update({
-  id: '/workspace',
-  path: '/workspace',
+const WikiRoute = WikiRouteImport.update({
+  id: "/wiki",
+  path: "/wiki",
   getParentRoute: () => rootRouteImport,
 } as any)
-const WorkspaceIndexRoute = WorkspaceIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => WorkspaceRoute,
+const WikiIndexRoute = WikiIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => WikiRoute,
 } as any)
-const WorkspaceWorkspaceIdRoute = WorkspaceWorkspaceIdRouteImport.update({
-  id: '/$workspaceId',
-  path: '/$workspaceId',
-  getParentRoute: () => WorkspaceRoute,
+const WikiWikiIdRoute = WikiWikiIdRouteImport.update({
+  id: "/$wikiId",
+  path: "/$wikiId",
+  getParentRoute: () => WikiRoute,
 } as any)
-const WorkspaceWorkspaceIdIndexRoute =
-  WorkspaceWorkspaceIdIndexRouteImport.update({
-    id: '/',
-    path: '/',
-    getParentRoute: () => WorkspaceWorkspaceIdRoute,
-  } as any)
-const WorkspaceWorkspaceIdSplatRoute =
-  WorkspaceWorkspaceIdSplatRouteImport.update({
-    id: '/$',
-    path: '/$',
-    getParentRoute: () => WorkspaceWorkspaceIdRoute,
-  } as any)
+const WikiWikiIdIndexRoute = WikiWikiIdIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => WikiWikiIdRoute,
+} as any)
+const WikiWikiIdSplatRoute = WikiWikiIdSplatRouteImport.update({
+  id: "/$",
+  path: "/$",
+  getParentRoute: () => WikiWikiIdRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/workspace': typeof WorkspaceRouteWithChildren
-  '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdRouteWithChildren
-  '/workspace/': typeof WorkspaceIndexRoute
-  '/workspace/$workspaceId/$': typeof WorkspaceWorkspaceIdSplatRoute
-  '/workspace/$workspaceId/': typeof WorkspaceWorkspaceIdIndexRoute
+  "/": typeof IndexRoute
+  "/wiki": typeof WikiRouteWithChildren
+  "/wiki/$wikiId": typeof WikiWikiIdRouteWithChildren
+  "/wiki/": typeof WikiIndexRoute
+  "/wiki/$wikiId/$": typeof WikiWikiIdSplatRoute
+  "/wiki/$wikiId/": typeof WikiWikiIdIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/workspace': typeof WorkspaceIndexRoute
-  '/workspace/$workspaceId/$': typeof WorkspaceWorkspaceIdSplatRoute
-  '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdIndexRoute
+  "/": typeof IndexRoute
+  "/wiki": typeof WikiIndexRoute
+  "/wiki/$wikiId/$": typeof WikiWikiIdSplatRoute
+  "/wiki/$wikiId": typeof WikiWikiIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/workspace': typeof WorkspaceRouteWithChildren
-  '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdRouteWithChildren
-  '/workspace/': typeof WorkspaceIndexRoute
-  '/workspace/$workspaceId/$': typeof WorkspaceWorkspaceIdSplatRoute
-  '/workspace/$workspaceId/': typeof WorkspaceWorkspaceIdIndexRoute
+  "/": typeof IndexRoute
+  "/wiki": typeof WikiRouteWithChildren
+  "/wiki/$wikiId": typeof WikiWikiIdRouteWithChildren
+  "/wiki/": typeof WikiIndexRoute
+  "/wiki/$wikiId/$": typeof WikiWikiIdSplatRoute
+  "/wiki/$wikiId/": typeof WikiWikiIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
-    | '/workspace'
-    | '/workspace/$workspaceId'
-    | '/workspace/'
-    | '/workspace/$workspaceId/$'
-    | '/workspace/$workspaceId/'
+    | "/"
+    | "/wiki"
+    | "/wiki/$wikiId"
+    | "/wiki/"
+    | "/wiki/$wikiId/$"
+    | "/wiki/$wikiId/"
   fileRoutesByTo: FileRoutesByTo
-  to:
-    '/' | '/workspace' | '/workspace/$workspaceId/$' | '/workspace/$workspaceId'
+  to: "/" | "/wiki" | "/wiki/$wikiId/$" | "/wiki/$wikiId"
   id:
-    | '__root__'
-    | '/'
-    | '/workspace'
-    | '/workspace/$workspaceId'
-    | '/workspace/'
-    | '/workspace/$workspaceId/$'
-    | '/workspace/$workspaceId/'
+    | "__root__"
+    | "/"
+    | "/wiki"
+    | "/wiki/$wikiId"
+    | "/wiki/"
+    | "/wiki/$wikiId/$"
+    | "/wiki/$wikiId/"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  WorkspaceRoute: typeof WorkspaceRouteWithChildren
+  WikiRoute: typeof WikiRouteWithChildren
 }
 
-declare module '@tanstack/react-router' {
+declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
+    "/": {
+      id: "/"
+      path: "/"
+      fullPath: "/"
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/workspace': {
-      id: '/workspace'
-      path: '/workspace'
-      fullPath: '/workspace'
-      preLoaderRoute: typeof WorkspaceRouteImport
+    "/wiki": {
+      id: "/wiki"
+      path: "/wiki"
+      fullPath: "/wiki"
+      preLoaderRoute: typeof WikiRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/workspace/': {
-      id: '/workspace/'
-      path: '/'
-      fullPath: '/workspace/'
-      preLoaderRoute: typeof WorkspaceIndexRouteImport
-      parentRoute: typeof WorkspaceRoute
+    "/wiki/": {
+      id: "/wiki/"
+      path: "/"
+      fullPath: "/wiki/"
+      preLoaderRoute: typeof WikiIndexRouteImport
+      parentRoute: typeof WikiRoute
     }
-    '/workspace/$workspaceId': {
-      id: '/workspace/$workspaceId'
-      path: '/$workspaceId'
-      fullPath: '/workspace/$workspaceId'
-      preLoaderRoute: typeof WorkspaceWorkspaceIdRouteImport
-      parentRoute: typeof WorkspaceRoute
+    "/wiki/$wikiId": {
+      id: "/wiki/$wikiId"
+      path: "/$wikiId"
+      fullPath: "/wiki/$wikiId"
+      preLoaderRoute: typeof WikiWikiIdRouteImport
+      parentRoute: typeof WikiRoute
     }
-    '/workspace/$workspaceId/': {
-      id: '/workspace/$workspaceId/'
-      path: '/'
-      fullPath: '/workspace/$workspaceId/'
-      preLoaderRoute: typeof WorkspaceWorkspaceIdIndexRouteImport
-      parentRoute: typeof WorkspaceWorkspaceIdRoute
+    "/wiki/$wikiId/": {
+      id: "/wiki/$wikiId/"
+      path: "/"
+      fullPath: "/wiki/$wikiId/"
+      preLoaderRoute: typeof WikiWikiIdIndexRouteImport
+      parentRoute: typeof WikiWikiIdRoute
     }
-    '/workspace/$workspaceId/$': {
-      id: '/workspace/$workspaceId/$'
-      path: '/$'
-      fullPath: '/workspace/$workspaceId/$'
-      preLoaderRoute: typeof WorkspaceWorkspaceIdSplatRouteImport
-      parentRoute: typeof WorkspaceWorkspaceIdRoute
+    "/wiki/$wikiId/$": {
+      id: "/wiki/$wikiId/$"
+      path: "/$"
+      fullPath: "/wiki/$wikiId/$"
+      preLoaderRoute: typeof WikiWikiIdSplatRouteImport
+      parentRoute: typeof WikiWikiIdRoute
     }
   }
 }
 
-interface WorkspaceWorkspaceIdRouteChildren {
-  WorkspaceWorkspaceIdSplatRoute: typeof WorkspaceWorkspaceIdSplatRoute
-  WorkspaceWorkspaceIdIndexRoute: typeof WorkspaceWorkspaceIdIndexRoute
+interface WikiWikiIdRouteChildren {
+  WikiWikiIdSplatRoute: typeof WikiWikiIdSplatRoute
+  WikiWikiIdIndexRoute: typeof WikiWikiIdIndexRoute
 }
 
-const WorkspaceWorkspaceIdRouteChildren: WorkspaceWorkspaceIdRouteChildren = {
-  WorkspaceWorkspaceIdSplatRoute: WorkspaceWorkspaceIdSplatRoute,
-  WorkspaceWorkspaceIdIndexRoute: WorkspaceWorkspaceIdIndexRoute,
+const WikiWikiIdRouteChildren: WikiWikiIdRouteChildren = {
+  WikiWikiIdSplatRoute: WikiWikiIdSplatRoute,
+  WikiWikiIdIndexRoute: WikiWikiIdIndexRoute,
 }
 
-const WorkspaceWorkspaceIdRouteWithChildren =
-  WorkspaceWorkspaceIdRoute._addFileChildren(WorkspaceWorkspaceIdRouteChildren)
-
-interface WorkspaceRouteChildren {
-  WorkspaceWorkspaceIdRoute: typeof WorkspaceWorkspaceIdRouteWithChildren
-  WorkspaceIndexRoute: typeof WorkspaceIndexRoute
-}
-
-const WorkspaceRouteChildren: WorkspaceRouteChildren = {
-  WorkspaceWorkspaceIdRoute: WorkspaceWorkspaceIdRouteWithChildren,
-  WorkspaceIndexRoute: WorkspaceIndexRoute,
-}
-
-const WorkspaceRouteWithChildren = WorkspaceRoute._addFileChildren(
-  WorkspaceRouteChildren,
+const WikiWikiIdRouteWithChildren = WikiWikiIdRoute._addFileChildren(
+  WikiWikiIdRouteChildren
 )
+
+interface WikiRouteChildren {
+  WikiWikiIdRoute: typeof WikiWikiIdRouteWithChildren
+  WikiIndexRoute: typeof WikiIndexRoute
+}
+
+const WikiRouteChildren: WikiRouteChildren = {
+  WikiWikiIdRoute: WikiWikiIdRouteWithChildren,
+  WikiIndexRoute: WikiIndexRoute,
+}
+
+const WikiRouteWithChildren = WikiRoute._addFileChildren(WikiRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  WorkspaceRoute: WorkspaceRouteWithChildren,
+  WikiRoute: WikiRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
 
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
+import type { getRouter } from "./router.tsx"
+import type { createStart } from "@tanstack/react-start"
+declare module "@tanstack/react-start" {
   interface Register {
     ssr: true
     router: Awaited<ReturnType<typeof getRouter>>

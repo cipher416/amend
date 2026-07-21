@@ -175,12 +175,12 @@ The redo protocol restores committed changes after a crash.
 
     await writeFile(join(workspacePath, "notes.md"), "uncommitted\n")
     await expect(index.refresh()).rejects.toMatchObject({
-      code: "invalid-workspace",
+      code: "invalid-wiki",
     })
     await rm(join(workspacePath, "notes.md"))
     await git(workspacePath, "switch", "-c", "other")
     await expect(index.refresh()).rejects.toMatchObject({
-      code: "invalid-workspace",
+      code: "invalid-wiki",
     })
     await index.close()
   })
@@ -342,7 +342,7 @@ async function createWikiWorkspace(): Promise<string> {
   ])
   await Promise.all([
     writeFile(
-      join(workspacePath, ".amend/workspace.json"),
+      join(workspacePath, ".amend/wiki.json"),
       `${JSON.stringify({
         version: 2,
         id: "123e4567-e89b-42d3-a456-426614174000",

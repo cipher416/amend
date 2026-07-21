@@ -9,12 +9,12 @@ import { registerRendererProtocol } from "./renderer-protocol"
 import { rendererOrigin } from "./renderer-path"
 import { resolveWikiSkillPath } from "./resource-paths"
 import { isAllowedNavigation, secureWebPreferences } from "./security"
-import { WorkspaceService } from "./workspace-service"
+import { WikiService } from "./wiki-service"
 
 const developmentRendererUrl = "http://127.0.0.1:3001"
 const mainDirectory = path.dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
-let workspaceService: WorkspaceService | undefined
+let wikiService: WikiService | undefined
 let piCredentialService: PiCredentialService | undefined
 let disposeIpc: (() => void) | undefined
 let disposePiIpc: (() => void) | undefined
@@ -67,16 +67,16 @@ function createWindow() {
        origin: window.location.origin,
        nodeType: typeof window.process,
        runtime: window.amend?.runtime,
-       hasWorkspaceApi: typeof window.amend?.workspaces?.create === "function",
-       hasWikiApi: typeof window.amend?.wiki?.search === "function",
+       hasWikiApi: typeof window.amend?.wikis?.create === "function",
+        hasWikiContentApi: typeof window.amend?.wiki?.search === "function",
        hasProviderApi: typeof window.amend?.providers?.status === "function"
      })`)
     const passed =
       result.origin === rendererOrigin &&
       result.nodeType === "undefined" &&
       result.runtime === "electron" &&
-      result.hasWorkspaceApi === true &&
       result.hasWikiApi === true &&
+      result.hasWikiContentApi === true &&
       result.hasProviderApi === true
 
     console.log("AMEND_SMOKE_RESULT", JSON.stringify(result))
@@ -114,7 +114,7 @@ app.whenReady().then(async () => {
     ? rendererOrigin
     : new URL(developmentRendererUrl).origin
   nativeTheme.themeSource = "system"
-  workspaceService = new WorkspaceService({
+  wikiService = new WikiService({
     userDataPath: app.getPath("userData"),
     skillPath: resolveWikiSkillPath({
       isPackaged: app.isPackaged,
@@ -122,11 +122,11 @@ app.whenReady().then(async () => {
       resourcesPath: process.resourcesPath,
     }),
   })
-  await workspaceService.restoreLastActiveWorkspace().catch((error: unknown) => {
-    console.error("[amend] workspace restoration failed:", error)
+  await wikiService.restoreLastActiveWiki().catch((error: unknown) => {
+    console.error("[amend] wiki restoration failed:", error)
   })
   disposeIpc = registerWikiIpc({
-    service: workspaceService,
+    service: wikiService,
     allowedOrigin,
     getWindow: () => mainWindow,
   })
@@ -150,11 +150,11 @@ app.whenReady().then(async () => {
 })
 
 app.on("before-quit", (event) => {
-  if (!workspaceService || shutdownComplete) return
+  if (!wikiService || shutdownComplete) return
   event.preventDefault()
   if (shutdownStarted) return
   shutdownStarted = true
-  void workspaceService.dispose().finally(() => {
+  void wikiService.dispose().finally(() => {
     piCredentialService?.dispose()
     disposeAppearanceIpc?.()
     disposePiIpc?.()

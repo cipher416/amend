@@ -350,7 +350,7 @@ function getSuccessfulAssistantOutput(
 function createLintRepairPrompt(
   diagnostics: readonly WikiLintDiagnostic[]
 ): string {
-  return `The deterministic wiki linter rejected the current workspace. Fix every diagnostic below, then finish the ingest. Do not modify raw sources or create Git commits.
+  return `The deterministic wiki linter rejected the current wiki. Fix every diagnostic below, then finish the ingest. Do not modify raw sources or create Git commits.
 
 ${diagnostics
   .map(
@@ -453,7 +453,7 @@ async function assertWorkspacePath(
     pathInput.startsWith("~") ||
     pathInput.startsWith("@")
   ) {
-    throw new Error(`Pi tool path is outside the wiki workspace: ${pathInput}`)
+    throw new Error(`Pi tool path is outside the wiki: ${pathInput}`)
   }
   const normalizedInput = normalizePiToolPath(pathInput)
   const rootPath = await realpath(workspacePath)
@@ -464,7 +464,7 @@ async function assertWorkspacePath(
     relativePath.startsWith(`..${sep}`) ||
     isAbsolute(relativePath)
   ) {
-    throw new Error(`Pi tool path is outside the wiki workspace: ${pathInput}`)
+    throw new Error(`Pi tool path is outside the wiki: ${pathInput}`)
   }
   if (relativePath === ".git" || relativePath.startsWith(`.git${sep}`)) {
     throw new Error(`Pi tool path is protected Git metadata: ${pathInput}`)
@@ -496,12 +496,9 @@ function normalizePiToolPath(pathInput: string): string {
   try {
     return fileURLToPath(normalized)
   } catch (error) {
-    throw new Error(
-      `Pi tool path is outside the wiki workspace: ${pathInput}`,
-      {
-        cause: error,
-      }
-    )
+    throw new Error(`Pi tool path is outside the wiki: ${pathInput}`, {
+      cause: error,
+    })
   }
 }
 

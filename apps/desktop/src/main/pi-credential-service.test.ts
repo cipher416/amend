@@ -4,7 +4,7 @@ import { describe, it } from "vitest"
 import type { PiLoginEvent } from "@workspace/contract"
 
 import { PiCredentialService } from "./pi-credential-service.ts"
-import { WorkspaceServiceError } from "./workspace-service.ts"
+import { WikiServiceError } from "./wiki-service.ts"
 
 describe("Pi credential service", () => {
   it("delegates status, provider, and model listings", async () => {
@@ -42,12 +42,12 @@ describe("Pi credential service", () => {
     await assert.rejects(
       service.listModels("nonsense"),
       (error: unknown) =>
-        error instanceof WorkspaceServiceError && error.code === "invalid-input"
+        error instanceof WikiServiceError && error.code === "invalid-input"
     )
     await assert.rejects(
       service.saveApiKeyCredential("nonsense", "sk-key"),
       (error: unknown) =>
-        error instanceof WorkspaceServiceError && error.code === "invalid-input"
+        error instanceof WikiServiceError && error.code === "invalid-input"
     )
   })
 
@@ -76,7 +76,7 @@ describe("Pi credential service", () => {
     await assert.rejects(
       service.setDefaultModel("zai", "not-a-real-model"),
       (error: unknown) =>
-        error instanceof WorkspaceServiceError && error.code === "invalid-input"
+        error instanceof WikiServiceError && error.code === "invalid-input"
     )
   })
 
@@ -185,7 +185,7 @@ describe("Pi credential service", () => {
     assert.throws(
       () => service.respondToPrompt("no-such-login", "no-such-prompt", "value"),
       (error: unknown) =>
-        error instanceof WorkspaceServiceError && error.code === "invalid-input"
+        error instanceof WikiServiceError && error.code === "invalid-input"
     )
   })
 })

@@ -1,4 +1,6 @@
-import { useEffect, useReducer } from "react"
+import { useEffect, useReducer, useRef, useState } from "react"
+import { ArrowDown01Icon, Tick02Icon } from "@hugeicons/core-free-icons"
+import { HugeiconsIcon } from "@hugeicons/react"
 import type {
   AmendApi,
   PiLoginEvent,
@@ -14,10 +16,19 @@ import {
   FieldLabel,
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@workspace/ui/components/command"
 import { Separator } from "@workspace/ui/components/separator"
 import { Spinner } from "@workspace/ui/components/spinner"
 
 import { errorMessage } from "@/lib/amend-client"
+import { cn } from "@workspace/ui/lib/utils"
 
 import { WorkflowError } from "./wiki-workflow-ui"
 
@@ -490,24 +501,12 @@ function ModelStep({
     <div className="flex flex-col gap-4">
       <Field>
         <FieldLabel htmlFor="pi-default-model">Default model</FieldLabel>
-        <select
-          id="pi-default-model"
-          aria-label="Default model"
-          className="h-7 w-full rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-          value={state.selectedModel ?? ""}
+        <ModelPicker
+          models={state.models ?? []}
+          value={state.selectedModel}
           disabled={state.busy}
-          onChange={(event) => onModelSelect(event.target.value)}
-          required
-        >
-          <option value="" disabled>
-            Choose a model
-          </option>
-          {state.models?.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.name}
-            </option>
-          ))}
-        </select>
+          onChange={onModelSelect}
+        />
         <FieldDescription>
           Used to read documents and write the wiki. You can change this later.
         </FieldDescription>
@@ -524,6 +523,99 @@ function ModelStep({
           Continue
         </Button>
       </div>
+    </div>
+  )
+}
+
+function ModelPicker({
+  models,
+  value,
+  disabled,
+  onChange,
+}: {
+  models: readonly PiModelSummary[]
+  value?: string
+  disabled: boolean
+  onChange: (model: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const selected = models.find((model) => model.id === value)
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus()
+  }, [open])
+
+  const close = () => {
+    setOpen(false)
+    triggerRef.current?.focus()
+  }
+
+  return (
+    <div className="relative">
+      <Button
+        ref={triggerRef}
+        id="pi-default-model"
+        type="button"
+        variant="outline"
+        role="combobox"
+        aria-label="Default model"
+        aria-expanded={open}
+        aria-controls={open ? "pi-default-model-list" : undefined}
+        aria-haspopup="listbox"
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault()
+            setOpen(true)
+          }
+        }}
+        className="w-full justify-between"
+      >
+        <span className="truncate">{selected?.name ?? "Choose a model"}</span>
+        <HugeiconsIcon icon={ArrowDown01Icon} data-icon="inline-end" />
+      </Button>
+      {open ? (
+        <div className="absolute z-10 mt-1 w-full rounded-lg border bg-popover p-1 text-popover-foreground shadow-md">
+          <Command
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault()
+                close()
+              }
+            }}
+          >
+            <CommandInput ref={inputRef} placeholder="Search models..." />
+            <CommandList id="pi-default-model-list">
+              <CommandEmpty>No models found.</CommandEmpty>
+              <CommandGroup>
+                {models.map((model) => (
+                  <CommandItem
+                    key={model.id}
+                    value={`${model.name} ${model.id}`}
+                    onSelect={() => {
+                      onChange(model.id)
+                      close()
+                    }}
+                  >
+                    <span className="min-w-0 truncate">{model.name}</span>
+                    <HugeiconsIcon
+                      aria-hidden="true"
+                      icon={Tick02Icon}
+                      className={cn(
+                        "ml-auto",
+                        value === model.id ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </div>
+      ) : null}
     </div>
   )
 }

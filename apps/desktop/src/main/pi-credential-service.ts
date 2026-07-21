@@ -10,9 +10,9 @@ import type {
 import type { OAuthLoginCallbacks } from "@workspace/wiki-engine/agent/pi-credentials"
 import { shell } from "electron"
 
-import { WorkspaceServiceError } from "./workspace-service"
+import { WikiServiceError } from "./wiki-service"
 
-// The Pi SDK is loaded lazily (mirroring workspace-service.ts's dynamic
+// The Pi SDK is loaded lazily (mirroring wiki-service.ts's dynamic
 // `@workspace/wiki-engine/agent/pi` import) so test doubles never have to
 // pull in the real SDK, and its module resolution cost is only paid once a
 // user actually connects a provider. Dynamic import() of the same specifier
@@ -124,7 +124,7 @@ export class PiCredentialService {
     await this.requireKnownProvider(provider)
     const models = await this.options.listModelsForProvider(provider)
     if (!models.some((candidate) => candidate.id === model)) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "Choose a model offered by this provider."
       )
@@ -146,7 +146,7 @@ export class PiCredentialService {
       !pending?.pendingPrompt ||
       pending.pendingPrompt.promptId !== promptId
     ) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "This prompt is no longer active."
       )
@@ -175,7 +175,7 @@ export class PiCredentialService {
 
   private async requireKnownProvider(provider: string): Promise<void> {
     if (!(await this.options.isKnownProvider(provider))) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "Choose a supported model provider."
       )

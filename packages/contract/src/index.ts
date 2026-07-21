@@ -11,13 +11,13 @@ export type AmendErrorCode =
   | "ingest-failed"
   | "invalid-input"
   | "invalid-location"
-  | "no-active-workspace"
+  | "no-active-wiki"
   | "operation-failed"
   | "pi-configuration-missing"
   | "pi-failed"
   | "unauthorized"
-  | "workspace-creation-failed"
-  | "workspace-open-failed"
+  | "wiki-creation-failed"
+  | "wiki-open-failed"
 
 export interface AmendError {
   code: AmendErrorCode
@@ -27,16 +27,16 @@ export interface AmendError {
 export type AmendResult<T> =
   { ok: true; value: T } | { ok: false; error: AmendError }
 
-export interface WorkspaceHome {
+export interface WikiHome {
   displayPath: string
 }
 
-export interface CreateWorkspaceInput {
+export interface CreateWikiInput {
   name: string
   domain: string
 }
 
-export interface WorkspaceListItem {
+export interface WikiListItem {
   id: string
   name: string
   displayPath: string
@@ -44,11 +44,11 @@ export interface WorkspaceListItem {
   running: boolean
 }
 
-export interface ActivateWorkspaceInput {
-  workspaceId: string
+export interface ActivateWikiInput {
+  wikiId: string
 }
 
-export interface WorkspaceSummary {
+export interface WikiSummary {
   id: string
   name: string
   domain: string
@@ -119,7 +119,7 @@ export interface WikiIngestJob {
 }
 
 export interface WikiIngestChangedEvent {
-  workspaceId: string
+  wikiId: string
   job: WikiIngestJob
 }
 
@@ -264,17 +264,13 @@ export interface AmendApi {
   readonly appearance: {
     setTheme: (theme: ThemeSource) => Promise<AmendResult<null>>
   }
-  readonly workspaces: {
-    chooseHome: () => Promise<AmendResult<WorkspaceHome | null>>
-    home: () => Promise<AmendResult<WorkspaceHome | null>>
-    create: (
-      input: CreateWorkspaceInput
-    ) => Promise<AmendResult<WorkspaceSummary>>
-    current: () => Promise<AmendResult<WorkspaceSummary | null>>
-    list: () => Promise<AmendResult<readonly WorkspaceListItem[]>>
-    activate: (
-      input: ActivateWorkspaceInput
-    ) => Promise<AmendResult<WorkspaceSummary>>
+  readonly wikis: {
+    chooseHome: () => Promise<AmendResult<WikiHome | null>>
+    home: () => Promise<AmendResult<WikiHome | null>>
+    create: (input: CreateWikiInput) => Promise<AmendResult<WikiSummary>>
+    current: () => Promise<AmendResult<WikiSummary | null>>
+    list: () => Promise<AmendResult<readonly WikiListItem[]>>
+    activate: (input: ActivateWikiInput) => Promise<AmendResult<WikiSummary>>
   }
   readonly providers: {
     status: () => Promise<AmendResult<PiConnectionStatus>>
@@ -331,14 +327,14 @@ const nonBlankText = (maxLength: number) =>
     (value) => value.trim().length > 0,
     () => "Value must contain non-whitespace text"
   )
-const workspaceNameSchema = Type.Refine(
+const wikiNameSchema = Type.Refine(
   Type.String({ minLength: 1, maxLength: 80 }),
   (value) =>
     value.trim() === value &&
     value !== "." &&
     value !== ".." &&
     !/[\\/\0]/.test(value),
-  () => "Workspace name must be a safe directory name"
+  () => "Wiki name must be a safe directory name"
 )
 const wikiPageTypeSchema = Type.Union([
   Type.Literal("entity"),
@@ -356,17 +352,17 @@ const wikiFilePathSchema = Type.String({
   maxLength: 1_000,
 })
 
-export const createWorkspaceInputSchema = Type.Object(
+export const createWikiInputSchema = Type.Object(
   {
-    name: workspaceNameSchema,
+    name: wikiNameSchema,
     domain: nonBlankText(2_000),
   },
   { additionalProperties: false }
 )
 
-export const activateWorkspaceInputSchema = Type.Object(
+export const activateWikiInputSchema = Type.Object(
   {
-    workspaceId: Type.String({
+    wikiId: Type.String({
       minLength: 1,
       maxLength: 128,
       pattern: "^[a-zA-Z0-9_-]+$",
@@ -473,16 +469,14 @@ export const readWikiFileInputSchema = Type.Object(
   { additionalProperties: false }
 )
 
-export function isCreateWorkspaceInput(
-  value: unknown
-): value is CreateWorkspaceInput {
-  return Value.Check(createWorkspaceInputSchema, value)
+export function isCreateWikiInput(value: unknown): value is CreateWikiInput {
+  return Value.Check(createWikiInputSchema, value)
 }
 
-export function isActivateWorkspaceInput(
+export function isActivateWikiInput(
   value: unknown
-): value is ActivateWorkspaceInput {
-  return Value.Check(activateWorkspaceInputSchema, value)
+): value is ActivateWikiInput {
+  return Value.Check(activateWikiInputSchema, value)
 }
 
 export function isIngestDocumentInput(

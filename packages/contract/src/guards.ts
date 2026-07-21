@@ -18,9 +18,9 @@ import type {
   WikiProgressEvent,
   WikiSearchResult,
   WikiTagFacet,
-  WorkspaceListItem,
-  WorkspaceHome,
-  WorkspaceSummary,
+  WikiHome,
+  WikiListItem,
+  WikiSummary,
 } from "./index.ts"
 
 export type Guard<T> = (value: unknown) => value is T
@@ -33,13 +33,13 @@ const errorCodes = new Set<AmendErrorCode>([
   "ingest-failed",
   "invalid-input",
   "invalid-location",
-  "no-active-workspace",
+  "no-active-wiki",
   "operation-failed",
   "pi-configuration-missing",
   "pi-failed",
   "unauthorized",
-  "workspace-creation-failed",
-  "workspace-open-failed",
+  "wiki-creation-failed",
+  "wiki-open-failed",
 ])
 const progressPhases = new Set<WikiProgressEvent["phase"]>([
   "preparing",
@@ -65,17 +65,17 @@ export function isAmendResult<T>(
 
 export const isNull: Guard<null> = (value): value is null => value === null
 
-export const isWorkspaceHomeOrNull: Guard<WorkspaceHome | null> = (
+export const isWikiHomeOrNull: Guard<WikiHome | null> = (
   value
-): value is WorkspaceHome | null =>
+): value is WikiHome | null =>
   value === null ||
   (isRecord(value) &&
     hasOnlyKeys(value, ["displayPath"]) &&
     isString(value.displayPath))
 
-export const isWorkspaceSummary: Guard<WorkspaceSummary> = (
+export const isWikiSummary: Guard<WikiSummary> = (
   value
-): value is WorkspaceSummary =>
+): value is WikiSummary =>
   isRecord(value) &&
   hasOnlyKeys(value, [
     "id",
@@ -92,15 +92,14 @@ export const isWorkspaceSummary: Guard<WorkspaceSummary> = (
   isString(value.commitHash) &&
   (value.setupStatus === "initialized" || value.setupStatus === "ready")
 
-export const isWorkspaceSummaryOrNull: Guard<WorkspaceSummary | null> = (
+export const isWikiSummaryOrNull: Guard<WikiSummary | null> = (
   value
-): value is WorkspaceSummary | null =>
-  value === null || isWorkspaceSummary(value)
+): value is WikiSummary | null => value === null || isWikiSummary(value)
 
-export const isWorkspaceListItems: Guard<readonly WorkspaceListItem[]> = (
+export const isWikiListItems: Guard<readonly WikiListItem[]> = (
   value
-): value is readonly WorkspaceListItem[] =>
-  Array.isArray(value) && value.every(isWorkspaceListItem)
+): value is readonly WikiListItem[] =>
+  Array.isArray(value) && value.every(isWikiListItem)
 
 export const isSourceDocumentSelection: Guard<SourceDocumentSelection> = (
   value
@@ -229,8 +228,8 @@ export const isWikiIngestChangedEvent: Guard<WikiIngestChangedEvent> = (
   value
 ): value is WikiIngestChangedEvent =>
   isRecord(value) &&
-  hasOnlyKeys(value, ["workspaceId", "job"]) &&
-  isString(value.workspaceId) &&
+  hasOnlyKeys(value, ["wikiId", "job"]) &&
+  isString(value.wikiId) &&
   isWikiIngestJob(value.job)
 
 export const isWikiSearchResults: Guard<readonly WikiSearchResult[]> = (
@@ -445,7 +444,7 @@ function isWikiFileTreeItem(value: unknown): value is WikiFileTreeItem {
   )
 }
 
-function isWorkspaceListItem(value: unknown): value is WorkspaceListItem {
+function isWikiListItem(value: unknown): value is WikiListItem {
   return (
     isRecord(value) &&
     hasOnlyKeys(value, ["id", "name", "displayPath", "active", "running"]) &&

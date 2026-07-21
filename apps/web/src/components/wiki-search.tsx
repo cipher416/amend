@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate, useRouter } from "@tanstack/react-router"
-import type { AmendApi, WorkspaceSummary } from "@workspace/contract"
+import type { AmendApi, WikiSummary } from "@workspace/contract"
 import { Search01Icon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
@@ -17,16 +17,16 @@ import { Button } from "@workspace/ui/components/button"
 import { Spinner } from "@workspace/ui/components/spinner"
 import { useEffect, useEffectEvent, useState } from "react"
 
-import { searchWiki } from "@/lib/workspace-queries"
+import { searchWiki } from "@/lib/wiki-queries"
 
 const searchDebounceMs = 200
 
-export function WorkspaceSearch({
+export function WikiSearch({
   desktop,
-  workspace,
+  wiki,
 }: {
   desktop: AmendApi
-  workspace: WorkspaceSummary
+  wiki: WikiSummary
 }) {
   const navigate = useNavigate()
   const queryClient = useRouter().options.context.queryClient
@@ -39,7 +39,7 @@ export function WorkspaceSearch({
     searchQuery.length > 0 && searchQuery !== debouncedSearchQuery
   const search = useQuery(
     {
-      queryKey: ["workspace", workspace.id, "search", debouncedSearchQuery],
+      queryKey: ["wiki", wiki.id, "search", debouncedSearchQuery],
       queryFn: () =>
         searchWiki(desktop, { query: debouncedSearchQuery, limit: 20 }),
       enabled:
@@ -83,8 +83,8 @@ export function WorkspaceSearch({
   function openResult(path: string) {
     onOpenChange(false)
     void navigate({
-      to: "/workspace/$workspaceId/$",
-      params: { workspaceId: workspace.id, _splat: path },
+      to: "/wiki/$wikiId/$",
+      params: { wikiId: wiki.id, _splat: path },
     })
   }
 
@@ -106,7 +106,7 @@ export function WorkspaceSearch({
       <CommandDialog
         open={open}
         onOpenChange={onOpenChange}
-        title={`Search ${workspace.name}`}
+        title={`Search ${wiki.name}`}
         description="Search indexed wiki pages and source material."
         className="w-[calc(100%-2rem)] max-w-3xl border-border/80 bg-popover/95 shadow-2xl backdrop-blur-xl sm:max-w-3xl"
       >

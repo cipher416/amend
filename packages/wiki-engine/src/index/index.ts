@@ -19,7 +19,7 @@ import {
 } from "../internal/format.ts"
 import type { WikiPageType, WikiSourceKind } from "../internal/format.ts"
 import { git, gitRaw } from "../internal/git.ts"
-import { resolveWorkspacePath } from "../workspace.ts"
+import { resolveWikiPath } from "../wiki.ts"
 
 export type WikiIndexDocumentKind = "page" | "source"
 export type WikiIndexSearchScope = "all" | "pages" | "sources"
@@ -83,7 +83,7 @@ export type WikiIndexErrorCode =
   | "closed"
   | "invalid-database"
   | "invalid-query"
-  | "invalid-workspace"
+  | "invalid-wiki"
   | "refresh-failed"
   | "unsupported-database"
 
@@ -130,10 +130,10 @@ const endHighlight = "\u0002"
 export async function openWikiIndex(
   options: WikiIndexOptions
 ): Promise<WikiIndex> {
-  const workspacePath = await resolveWorkspacePath({
-    workspacePath: options.workspacePath,
+  const workspacePath = await resolveWikiPath({
+    wikiPath: options.workspacePath,
   }).catch((error: unknown) => {
-    throw new WikiIndexError("invalid-workspace", "Invalid wiki workspace", {
+    throw new WikiIndexError("invalid-wiki", "Invalid wiki", {
       cause: error,
     })
   })
@@ -144,7 +144,7 @@ export async function openWikiIndex(
   if (isInside(workspacePath, prospectiveDatabasePath)) {
     throw new WikiIndexError(
       "invalid-database",
-      "Wiki index database must be outside the wiki worktree"
+      "Wiki index database must be outside the wiki directory"
     )
   }
   await mkdir(dirname(requestedDatabasePath), { recursive: true })
@@ -152,7 +152,7 @@ export async function openWikiIndex(
   if (isInside(workspacePath, databasePath)) {
     throw new WikiIndexError(
       "invalid-database",
-      "Wiki index database must be outside the wiki worktree"
+      "Wiki index database must be outside the wiki directory"
     )
   }
   let database: DatabaseSync | undefined
@@ -262,19 +262,19 @@ class SqliteWikiIndex implements WikiIndex {
   private async refreshSnapshot(): Promise<WikiIndexRefreshResult> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        await resolveWorkspacePath({ workspacePath: this.workspacePath }).catch(
+        await resolveWikiPath({ wikiPath: this.workspacePath }).catch(
           (error: unknown) => {
             throw new WikiIndexError(
-              "invalid-workspace",
-              "Wiki workspace is no longer a clean main repository",
+              "invalid-wiki",
+              "Wiki is no longer a clean main repository",
               { cause: error }
             )
           }
         )
         if (await git(this.workspacePath, "status", "--porcelain")) {
           throw new WikiIndexError(
-            "invalid-workspace",
-            "Wiki workspace must be clean before indexing"
+            "invalid-wiki",
+            "Wiki must be clean before indexing"
           )
         }
         const commitHash = await git(this.workspacePath, "rev-parse", "HEAD")
@@ -593,7 +593,7 @@ function migrate(database: DatabaseSync, workspacePath: string): void {
   if (!metadata) {
     throw new WikiIndexError(
       "invalid-database",
-      "Wiki index database has no workspace owner"
+      "Wiki index database has no wiki owner"
     )
   }
   if (
@@ -601,7 +601,7 @@ function migrate(database: DatabaseSync, workspacePath: string): void {
   ) {
     throw new WikiIndexError(
       "invalid-database",
-      "Wiki index database belongs to another workspace"
+      "Wiki index database belongs to another wiki"
     )
   }
 }

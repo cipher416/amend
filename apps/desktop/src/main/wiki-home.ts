@@ -5,33 +5,33 @@ import { Type } from "typebox"
 import { Value } from "typebox/value"
 import type { Static } from "typebox"
 
-export interface WorkspaceHomeState {
+export interface WikiHomeState {
   readonly parentPath: string
-  readonly workspaceDirectory: string
-  readonly lastActiveWorkspaceId: string | null
+  readonly wikiDirectory: string
+  readonly lastActiveWikiId: string | null
 }
 
-const StoredWorkspaceHomeSchema = Type.Object(
+const StoredWikiHomeSchema = Type.Object(
   {
     version: Type.Literal(1),
     parentPath: Type.String({ minLength: 1 }),
-    lastActiveWorkspaceId: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+    lastActiveWikiId: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
   },
   { additionalProperties: false }
 )
 
-type StoredWorkspaceHome = Static<typeof StoredWorkspaceHomeSchema>
+type StoredWikiHome = Static<typeof StoredWikiHomeSchema>
 
-export class WorkspaceHome {
+export class WikiHome {
   private readonly directoryPath: string
   private readonly homePath: string
 
   constructor({ userDataPath }: { userDataPath: string }) {
-    this.directoryPath = join(userDataPath, "workspaces")
+    this.directoryPath = join(userDataPath, "wikis")
     this.homePath = join(this.directoryPath, "home.json")
   }
 
-  async read(): Promise<WorkspaceHomeState | null> {
+  async read(): Promise<WikiHomeState | null> {
     let source: string
     try {
       source = await readFile(this.homePath, "utf8")
@@ -39,7 +39,7 @@ export class WorkspaceHome {
       if (isMissingFile(error)) return null
       throw error
     }
-    const stored = parseStoredWorkspaceHome(source)
+    const stored = parseStoredWikiHome(source)
     return stored ? toState(stored) : null
   }
 
@@ -47,21 +47,21 @@ export class WorkspaceHome {
     await this.write({
       version: 1,
       parentPath,
-      lastActiveWorkspaceId: null,
+      lastActiveWikiId: null,
     })
   }
 
-  async setLastActiveWorkspaceId(workspaceId: string | null): Promise<void> {
+  async setLastActiveWikiId(wikiId: string | null): Promise<void> {
     const home = await this.read()
     if (!home) throw new Error("Choose an Amend home first")
     await this.write({
       version: 1,
       parentPath: home.parentPath,
-      lastActiveWorkspaceId: workspaceId,
+      lastActiveWikiId: wikiId,
     })
   }
 
-  private async write(home: StoredWorkspaceHome): Promise<void> {
+  private async write(home: StoredWikiHome): Promise<void> {
     await mkdir(this.directoryPath, { recursive: true })
     const temporaryPath = join(
       this.directoryPath,
@@ -76,25 +76,26 @@ export class WorkspaceHome {
       await rename(temporaryPath, this.homePath)
       renamed = true
     } finally {
-      if (!renamed) await rm(temporaryPath, { force: true }).catch(() => undefined)
+      if (!renamed)
+        await rm(temporaryPath, { force: true }).catch(() => undefined)
     }
   }
 }
 
-function parseStoredWorkspaceHome(source: string): StoredWorkspaceHome | null {
+function parseStoredWikiHome(source: string): StoredWikiHome | null {
   try {
     const value: unknown = JSON.parse(source)
-    return Value.Check(StoredWorkspaceHomeSchema, value) ? value : null
+    return Value.Check(StoredWikiHomeSchema, value) ? value : null
   } catch {
     return null
   }
 }
 
-function toState(home: StoredWorkspaceHome): WorkspaceHomeState {
+function toState(home: StoredWikiHome): WikiHomeState {
   return {
     parentPath: home.parentPath,
-    workspaceDirectory: home.parentPath,
-    lastActiveWorkspaceId: home.lastActiveWorkspaceId,
+    wikiDirectory: home.parentPath,
+    lastActiveWikiId: home.lastActiveWikiId,
   }
 }
 

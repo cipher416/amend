@@ -1,8 +1,8 @@
 import type {
   SourceDocumentSelection,
   WikiIngestJob,
-  WorkspaceHome,
-  WorkspaceSummary,
+  WikiHome,
+  WikiSummary,
 } from "@workspace/contract"
 import {
   Alert,
@@ -35,7 +35,7 @@ const documentAccept = {
 }
 
 export function WikiSetupStep({
-  workspace,
+  wiki,
   wikiName,
   domain,
   home,
@@ -53,10 +53,10 @@ export function WikiSetupStep({
   onSubmit,
   onCancel,
 }: {
-  workspace?: WorkspaceSummary
+  wiki?: WikiSummary
   wikiName: string
   domain: string
-  home?: WorkspaceHome
+  home?: WikiHome
   document?: SourceDocumentSelection
   sourceFiles?: File[]
   objective: string
@@ -114,76 +114,84 @@ export function WikiSetupStep({
     )
   }
 
-  const workspaceLocked = workspace !== undefined
-  const sourceReady = workspaceLocked || Boolean(home && wikiName && domain)
+  const wikiLocked = wiki !== undefined
+  const sourceReady = wikiLocked || Boolean(home && wikiName && domain)
 
   return (
     <form className="py-2 sm:py-4" onSubmit={onSubmit}>
       <header className="mb-10 max-w-xl">
         <h1 className="font-heading text-3xl font-medium tracking-tight">
-          Create a knowledge base
+          Create wiki
         </h1>
         <p className="mt-2 text-sm/relaxed text-muted-foreground">
-          Define the workspace and add the first document Amend should turn into
-          linked knowledge.
+          Name the wiki and add the first document Amend should turn into linked
+          knowledge.
         </p>
       </header>
 
       <FieldGroup className="gap-8">
-        <section aria-labelledby="workspace-fields">
+        <section aria-labelledby="wiki-fields">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2
-              id="workspace-fields"
+              id="wiki-fields"
               className="text-xs font-medium text-muted-foreground"
             >
-              Workspace
+              Wiki
             </h2>
           </div>
           <div className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field data-disabled={workspaceLocked || undefined}>
-                <FieldLabel htmlFor="wiki-name">Workspace name</FieldLabel>
+              <Field data-disabled={wikiLocked || undefined}>
+                <FieldLabel htmlFor="wiki-name">Wiki name</FieldLabel>
                 <Input
                   id="wiki-name"
-                  name="workspace-name"
+                  name="wiki-name"
                   autoComplete="off"
-                  value={workspace?.name ?? wikiName}
+                  value={wiki?.name ?? wikiName}
                   onChange={(event) =>
                     onFieldChange("wikiName", event.target.value)
                   }
                   placeholder="Reliability research"
                   required
                   maxLength={80}
-                  disabled={workspaceLocked}
+                  disabled={wikiLocked}
                 />
               </Field>
 
-              <Field data-disabled={busy || workspaceLocked || undefined}>
-                <FieldLabel htmlFor="wiki-home">Amend home</FieldLabel>
-                <Button
-                  id="wiki-home"
-                  type="button"
-                  variant="outline"
-                  disabled={busy || workspaceLocked}
-                  onClick={onChooseHome}
-                  className="w-full justify-start"
-                >
-                  <span className="truncate">
-                    {home?.displayPath ??
-                      workspace?.displayPath ??
-                      "Choose Amend home"}
-                  </span>
-                </Button>
+              <Field data-disabled={busy || wikiLocked || undefined}>
+                <FieldLabel id="wiki-home-label" htmlFor="wiki-home">
+                  Amend home
+                </FieldLabel>
+                {home ? (
+                  <p
+                    id="wiki-home"
+                    aria-labelledby="wiki-home-label"
+                    className="flex h-9 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground"
+                  >
+                    <span className="truncate">{home.displayPath}</span>
+                  </p>
+                ) : (
+                  <Button
+                    id="wiki-home"
+                    type="button"
+                    variant="outline"
+                    disabled={busy || wikiLocked}
+                    onClick={onChooseHome}
+                    className="w-full justify-start"
+                  >
+                    <span className="truncate">Choose Amend home</span>
+                  </Button>
+                )}
               </Field>
             </div>
 
-            <Field data-disabled={workspaceLocked || undefined}>
+            <Field data-disabled={wikiLocked || undefined}>
               <FieldLabel htmlFor="wiki-domain">Domain</FieldLabel>
               <Textarea
                 id="wiki-domain"
-                name="workspace-domain"
+                name="wiki-domain"
                 autoComplete="off"
-                value={workspace?.domain ?? domain}
+                value={wiki?.domain ?? domain}
                 onChange={(event) =>
                   onFieldChange("domain", event.target.value)
                 }
@@ -191,7 +199,7 @@ export function WikiSetupStep({
                 required
                 maxLength={2000}
                 rows={3}
-                disabled={workspaceLocked}
+                disabled={wikiLocked}
               />
             </Field>
           </div>
@@ -274,15 +282,15 @@ export function WikiSetupStep({
           disabled={
             busy ||
             !document ||
-            (!workspaceLocked && (!home || !wikiName || !domain))
+            (!wikiLocked && (!home || !wikiName || !domain))
           }
         >
           {submitting ? <Spinner data-icon="inline-start" /> : null}
           {submitting
-            ? workspaceLocked
+            ? wikiLocked
               ? "Starting"
               : "Creating"
-            : workspaceLocked
+            : wikiLocked
               ? "Build wiki"
               : "Create wiki"}
         </Button>

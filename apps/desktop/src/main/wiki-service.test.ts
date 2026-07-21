@@ -12,8 +12,8 @@ import type {
   WikiRunResult,
 } from "@workspace/wiki-engine/ingest"
 
-import { WorkspaceHome } from "./workspace-home.ts"
-import { WorkspaceService, WorkspaceServiceError } from "./workspace-service.ts"
+import { WikiHome } from "./wiki-home.ts"
+import { WikiService, WikiServiceError } from "./wiki-service.ts"
 
 const temporaryDirectories: string[] = []
 
@@ -25,27 +25,24 @@ afterEach(async () => {
   )
 })
 
-describe("workspace service", () => {
-  it("creates a workspace as a sibling in the selected Amend library", async () => {
+describe("wiki service", () => {
+  it("creates a wiki as a sibling in the selected Amend library", async () => {
     const parent = await temporaryDirectory()
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
       createEngine: () => createFakeEngine([], []),
       openIndex: async () => createFakeIndex([]),
     })
 
-    await service.setWorkspaceHome(parent)
-    const workspace = await service.createWorkspace({
+    await service.setWikiHome(parent)
+    const workspace = await service.createWiki({
       name: "Reliability Wiki",
       domain: "Database reliability",
     })
 
-    assert.equal(
-      workspace.displayPath,
-      join(parent, "Reliability Wiki")
-    )
-    assert.deepEqual(await service.listWorkspaces(), [
+    assert.equal(workspace.displayPath, join(parent, "Reliability Wiki"))
+    assert.deepEqual(await service.listWikis(), [
       {
         id: workspace.id,
         name: "Reliability Wiki",
@@ -57,7 +54,7 @@ describe("workspace service", () => {
     await service.dispose()
   })
 
-  it("discovers sibling workspaces in the selected Amend library", async () => {
+  it("discovers sibling wikis in the selected Amend library", async () => {
     const parent = await temporaryDirectory()
     const workspaceDirectory = parent
     const firstPath = join(workspaceDirectory, "First Wiki")
@@ -70,19 +67,20 @@ describe("workspace service", () => {
       [firstPath, "123e4567-e89b-42d3-a456-426614174010"],
       [secondPath, "123e4567-e89b-42d3-a456-426614174011"],
     ])
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
-      readWorkspace: async ({ workspacePath }) => {
+      readWiki: async ({ wikiPath: workspacePath }) => {
         const id = ids.get(workspacePath)
         if (!id) throw new Error("Invalid wiki workspace manifest")
         return { id, domain: "Research", setupStatus: "ready" }
       },
-      openIndex: async ({ workspacePath }) => createFakeIndex([], workspacePath),
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
     })
-    await service.setWorkspaceHome(parent)
+    await service.setWikiHome(parent)
 
-    assert.deepEqual(await service.listWorkspaces(), [
+    assert.deepEqual(await service.listWikis(), [
       {
         id: "123e4567-e89b-42d3-a456-426614174010",
         name: "First Wiki",
@@ -101,46 +99,7 @@ describe("workspace service", () => {
     await service.dispose()
   })
 
-  it("migrates a legacy workspace while discovering the Amend library", async () => {
-    const parent = await temporaryDirectory()
-    const legacyPath = join(parent, "Legacy Wiki")
-    await mkdir(legacyPath)
-    const calls: string[] = []
-    const service = new WorkspaceService({
-      userDataPath: join(parent, "user-data"),
-      skillPath: "/app/llm-wiki/SKILL.md",
-      readWorkspace: async () => {
-        calls.push("read")
-        throw new Error("Invalid wiki workspace manifest")
-      },
-      migrateWorkspace: async ({ workspacePath }) => {
-        if (workspacePath !== legacyPath) {
-          throw new Error("Invalid legacy wiki workspace manifest")
-        }
-        calls.push("migrate")
-        return {
-          id: "123e4567-e89b-42d3-a456-426614174012",
-          domain: "Legacy research",
-          setupStatus: "initialized",
-        }
-      },
-    })
-    await service.setWorkspaceHome(parent)
-
-    assert.deepEqual(await service.listWorkspaces(), [
-      {
-        id: "123e4567-e89b-42d3-a456-426614174012",
-        name: "Legacy Wiki",
-        displayPath: legacyPath,
-        active: false,
-        running: false,
-      },
-    ])
-    assert.deepEqual(calls, ["read", "migrate", "read"])
-    await service.dispose()
-  })
-
-  it("creates a workspace, ingests a generated source path, and refreshes", async () => {
+  it("creates a wiki, ingests a generated source path, and refreshes", async () => {
     const parent = await temporaryDirectory()
     const calls: string[] = []
     const sourcePaths: string[] = []
@@ -151,7 +110,7 @@ describe("workspace service", () => {
       "job-id-1234567890",
       "source-id-1234567890",
     ]
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
       createId: () => ids.shift() ?? "fallback-id",
@@ -173,8 +132,8 @@ describe("workspace service", () => {
       "A WAL records mutations before pages change."
     )
     const document = await service.registerSourceDocument(7, documentPath)
-    await service.setWorkspaceHome(parent)
-    const workspace = await service.createWorkspace({
+    await service.setWikiHome(parent)
+    const workspace = await service.createWiki({
       name: "Reliability Wiki",
       domain: "Database reliability",
     })
@@ -187,7 +146,7 @@ describe("workspace service", () => {
     assert.equal(workspace.name, "Reliability Wiki")
     assert.equal(workspace.id, "123e4567-e89b-42d3-a456-426614174003")
     assert.equal(workspace.setupStatus, "initialized")
-    assert.equal(service.getCurrentWorkspace()?.id, workspace.id)
+    assert.equal(service.getCurrentWiki()?.id, workspace.id)
     assert.equal(started.jobId, "ingest_document-id-1234567890")
     assert.match(workspace.displayPath, /Reliability Wiki$/)
     assert.deepEqual(sourcePaths, [
@@ -196,8 +155,8 @@ describe("workspace service", () => {
     assert.equal(job.result?.commitHash, "ingest-commit")
     assert.equal(job.result.index.status, "ready")
     assert.equal(job.result.index.summary.commitHash, "ingest-commit")
-    assert.equal(service.getCurrentWorkspace()?.commitHash, "ingest-commit")
-    assert.equal(service.getCurrentWorkspace()?.setupStatus, "ready")
+    assert.equal(service.getCurrentWiki()?.commitHash, "ingest-commit")
+    assert.equal(service.getCurrentWiki()?.setupStatus, "ready")
     assert.ok(jobs.includes("running:preparing"))
     assert.ok(jobs.includes("running:indexing"))
     assert.equal(jobs.at(-1), "completed:indexing")
@@ -211,13 +170,13 @@ describe("workspace service", () => {
     assert.equal(calls.at(-1), "close")
   })
 
-  it("reserves workspace creation before checking the target", async () => {
+  it("reserves wiki creation before checking the target", async () => {
     const parent = await temporaryDirectory()
     let releaseInitialization: (() => void) | undefined
     const initializationBlocked = new Promise<void>((resolve) => {
       releaseInitialization = resolve
     })
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
       createId: () => "selection-id-1234567890",
@@ -237,29 +196,29 @@ describe("workspace service", () => {
       }),
       openIndex: async () => createFakeIndex([]),
     })
-    await service.setWorkspaceHome(parent)
-    const first = service.createWorkspace({
+    await service.setWikiHome(parent)
+    const first = service.createWiki({
       name: "Wiki",
       domain: "Research",
     })
 
     await assert.rejects(
-      service.createWorkspace({
+      service.createWiki({
         name: "Another Wiki",
         domain: "Research",
       }),
       (error: unknown) =>
-        error instanceof WorkspaceServiceError && error.code === "busy"
+        error instanceof WikiServiceError && error.code === "busy"
     )
     releaseInitialization?.()
     await first
     await service.dispose()
   })
 
-  it("cancels an active ingest and keeps the initialized workspace", async () => {
+  it("cancels an active ingest and keeps the initialized wiki", async () => {
     const parent = await temporaryDirectory()
     const index = createFakeIndex([])
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
       createId: () => "selection-id-1234567890",
@@ -267,8 +226,8 @@ describe("workspace service", () => {
       createEngine: () => createCancellableEngine(),
       openIndex: async () => index,
     })
-    await service.setWorkspaceHome(parent)
-    await service.createWorkspace({
+    await service.setWikiHome(parent)
+    await service.createWiki({
       name: "Wiki",
       domain: "Research",
     })
@@ -300,7 +259,7 @@ describe("workspace service", () => {
     const commitBlocked = new Promise<void>((resolve) => {
       releaseCommit = resolve
     })
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
       createId: () => "stable-id-1234567890",
@@ -323,8 +282,8 @@ describe("workspace service", () => {
       }),
       openIndex: async () => createFakeIndex([]),
     })
-    await service.setWorkspaceHome(parent)
-    await service.createWorkspace({
+    await service.setWikiHome(parent)
+    await service.createWiki({
       name: "Wiki",
       domain: "Research",
     })
@@ -342,8 +301,7 @@ describe("workspace service", () => {
     assert.throws(
       () => service.cancelIngest({ jobId: started.jobId }),
       (error: unknown) =>
-        error instanceof WorkspaceServiceError &&
-        error.code === "operation-failed"
+        error instanceof WikiServiceError && error.code === "operation-failed"
     )
 
     releaseCommit?.()
@@ -351,7 +309,7 @@ describe("workspace service", () => {
     await service.dispose()
   })
 
-  it("lists and activates open workspaces without reopening their indexes", async () => {
+  it("lists and activates open wikis without reopening their indexes", async () => {
     const parent = await temporaryDirectory()
     const workspaceDirectory = parent
     const firstPath = join(workspaceDirectory, "First Wiki")
@@ -365,20 +323,18 @@ describe("workspace service", () => {
       [firstPath, "123e4567-e89b-42d3-a456-426614174010"],
       [secondPath, "123e4567-e89b-42d3-a456-426614174011"],
     ])
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
-      readWorkspace: async ({ workspacePath }) => {
+      readWiki: async ({ wikiPath: workspacePath }) => {
         const id = ids.get(workspacePath)
         if (!id) throw new Error("Invalid wiki workspace manifest")
         return {
           id,
-          domain: workspacePath === firstPath ? "First domain" : "Second domain",
+          domain:
+            workspacePath === firstPath ? "First domain" : "Second domain",
           setupStatus: "ready",
         }
-      },
-      migrateWorkspace: async () => {
-        throw new Error("migration should not run")
       },
       openIndex: async ({ workspacePath, databasePath }) => {
         calls.push(`open:${databasePath}`)
@@ -386,18 +342,18 @@ describe("workspace service", () => {
       },
     })
 
-    await service.setWorkspaceHome(parent)
-    const first = await service.openWorkspace(firstPath)
-    const second = await service.openWorkspace(secondPath)
+    await service.setWikiHome(parent)
+    const first = await service.openWiki(firstPath)
+    const second = await service.openWiki(secondPath)
 
     assert.equal(first.name, "First Wiki")
     assert.equal(second.domain, "Second domain")
     assert.equal(second.commitHash, "initial-commit")
     assert.equal(second.setupStatus, "ready")
-    assert.equal(service.getCurrentWorkspace()?.id, second.id)
+    assert.equal(service.getCurrentWiki()?.id, second.id)
     assert.match(calls[0] ?? "", new RegExp(`${first.id}\\.sqlite$`))
     assert.match(calls[2] ?? "", new RegExp(`${second.id}\\.sqlite$`))
-    assert.deepEqual(await service.listWorkspaces(), [
+    assert.deepEqual(await service.listWikis(), [
       {
         id: first.id,
         name: "First Wiki",
@@ -413,8 +369,8 @@ describe("workspace service", () => {
         running: false,
       },
     ])
-    await service.activateWorkspace(first.id)
-    assert.equal(service.getCurrentWorkspace()?.id, first.id)
+    await service.activateWiki(first.id)
+    assert.equal(service.getCurrentWiki()?.id, first.id)
     assert.equal(
       calls.filter((call) => call === `close:${firstPath}`).length,
       0
@@ -424,7 +380,7 @@ describe("workspace service", () => {
     assert.equal(calls.filter((call) => call.startsWith("close:")).length, 2)
   })
 
-  it("switches workspaces during ingest and keeps updates with their origin", async () => {
+  it("switches wikis during ingest and keeps updates with their origin", async () => {
     const parent = await temporaryDirectory()
     const workspaceDirectory = parent
     const firstPath = join(workspaceDirectory, "First Wiki")
@@ -439,19 +395,23 @@ describe("workspace service", () => {
     const ingestBlocked = new Promise<void>((resolve) => {
       finishIngest = resolve
     })
-    const events: Array<{ workspaceId: string; status: string }> = []
-    const service = new WorkspaceService({
+    const events: Array<{ wikiId: string; status: string }> = []
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
       createId: () => "stable-id-1234567890",
-      readWorkspace: async ({ workspacePath }) => {
+      readWiki: async ({ wikiPath: workspacePath }) => {
         if (workspacePath === firstPath) {
           return { id: firstId, domain: "Research", setupStatus: "initialized" }
         }
         if (workspacePath === secondPath) {
-          return { id: secondId, domain: "Research", setupStatus: "initialized" }
+          return {
+            id: secondId,
+            domain: "Research",
+            setupStatus: "initialized",
+          }
         }
-        throw new Error("Invalid wiki workspace manifest")
+        throw new Error("Invalid wiki manifest")
       },
       createAgent: async () => createFakeAgent(),
       createEngine: () => ({
@@ -466,13 +426,13 @@ describe("workspace service", () => {
       openIndex: async ({ workspacePath: indexWorkspacePath }) =>
         createFakeIndex([], indexWorkspacePath),
     })
-    service.subscribeIngestChanged(({ workspaceId, job }) => {
-      events.push({ workspaceId, status: job.status })
+    service.subscribeIngestChanged(({ wikiId, job }) => {
+      events.push({ wikiId, status: job.status })
     })
-    await service.setWorkspaceHome(parent)
-    await service.openWorkspace(firstPath)
-    await service.openWorkspace(secondPath)
-    await service.activateWorkspace(firstId)
+    await service.setWikiHome(parent)
+    await service.openWiki(firstPath)
+    await service.openWiki(secondPath)
+    await service.activateWiki(firstId)
     const documentPath = join(parent, "Source.md")
     await writeFile(documentPath, "Material")
     const document = await service.registerSourceDocument(7, documentPath)
@@ -482,12 +442,12 @@ describe("workspace service", () => {
     })
 
     assert.equal(service.getCurrentIngest()?.status, "running")
-    assert.equal((await service.listWorkspaces())[0]?.running, true)
-    await service.activateWorkspace(secondId)
-    assert.equal(service.getCurrentWorkspace()?.id, secondId)
+    assert.equal((await service.listWikis())[0]?.running, true)
+    await service.activateWiki(secondId)
+    assert.equal(service.getCurrentWiki()?.id, secondId)
     assert.equal(service.getCurrentIngest(), null)
     assert.deepEqual(
-      (await service.listWorkspaces()).map(({ id, active, running }) => ({
+      (await service.listWikis()).map(({ id, active, running }) => ({
         id,
         active,
         running,
@@ -505,25 +465,25 @@ describe("workspace service", () => {
         objective: "Do not start concurrently",
       }),
       (error: unknown) =>
-        error instanceof WorkspaceServiceError && error.code === "busy"
+        error instanceof WikiServiceError && error.code === "busy"
     )
     finishIngest?.()
     await waitForTerminalEvent(events, firstId)
-    assert.equal(service.getCurrentWorkspace()?.commitHash, "initial-commit")
-    assert.ok(events.every(({ workspaceId }) => workspaceId === firstId))
+    assert.equal(service.getCurrentWiki()?.commitHash, "initial-commit")
+    assert.ok(events.every(({ wikiId }) => wikiId === firstId))
 
-    await service.activateWorkspace(firstId)
+    await service.activateWiki(firstId)
     assert.equal(service.getCurrentIngest()?.status, "completed")
     assert.equal(
       service.getCurrentIngest()?.result?.commitHash,
       "ingest-commit"
     )
-    assert.equal(service.getCurrentWorkspace()?.commitHash, "ingest-commit")
-    assert.equal(service.getCurrentWorkspace()?.setupStatus, "ready")
+    assert.equal(service.getCurrentWiki()?.commitHash, "ingest-commit")
+    assert.equal(service.getCurrentWiki()?.setupStatus, "ready")
     await service.dispose()
   })
 
-  it("accepts a document token after switching workspaces", async () => {
+  it("accepts a document token after switching wikis", async () => {
     const parent = await temporaryDirectory()
     const workspaceDirectory = parent
     const firstPath = join(workspaceDirectory, "First Wiki")
@@ -532,11 +492,11 @@ describe("workspace service", () => {
       mkdir(firstPath, { recursive: true }),
       mkdir(secondPath, { recursive: true }),
     ])
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
       createId: () => "stable-id-1234567890",
-      readWorkspace: async ({ workspacePath }) => ({
+      readWiki: async ({ wikiPath: workspacePath }) => ({
         id:
           workspacePath === firstPath
             ? "123e4567-e89b-42d3-a456-426614174050"
@@ -547,12 +507,12 @@ describe("workspace service", () => {
       openIndex: async ({ workspacePath: indexWorkspacePath }) =>
         createFakeIndex([], indexWorkspacePath),
     })
-    await service.setWorkspaceHome(parent)
-    await service.openWorkspace(firstPath)
+    await service.setWikiHome(parent)
+    await service.openWiki(firstPath)
     const documentPath = join(parent, "Source.txt")
     await writeFile(documentPath, "Material")
     const document = await service.registerSourceDocument(7, documentPath)
-    await service.openWorkspace(secondPath)
+    await service.openWiki(secondPath)
 
     await assert.doesNotReject(
       service.startIngest(7, {
@@ -563,7 +523,7 @@ describe("workspace service", () => {
     await service.dispose()
   })
 
-  it("lists visible workspace files and reads selected file content", async () => {
+  it("lists visible wiki files and reads selected file content", async () => {
     const parent = await temporaryDirectory()
     const workspacePath = join(parent, "Wiki")
     await mkdir(join(workspacePath, "concepts"), { recursive: true })
@@ -573,10 +533,10 @@ describe("workspace service", () => {
     await writeFile(join(workspacePath, "notes.txt"), "plain notes")
     await writeFile(join(workspacePath, "paper.pdf"), "pdf bytes")
     await writeFile(join(workspacePath, ".hidden.md"), "hidden")
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
-      readWorkspace: async () => ({
+      readWiki: async () => ({
         id: "123e4567-e89b-42d3-a456-426614174060",
         domain: "Research",
         setupStatus: "ready",
@@ -584,8 +544,8 @@ describe("workspace service", () => {
       openIndex: async ({ workspacePath: indexWorkspacePath }) =>
         createFakeIndex([], indexWorkspacePath),
     })
-    await service.setWorkspaceHome(parent)
-    await service.openWorkspace(workspacePath)
+    await service.setWikiHome(parent)
+    await service.openWiki(workspacePath)
 
     assert.deepEqual(await service.listFiles(), [
       {
@@ -615,61 +575,50 @@ describe("workspace service", () => {
     await assert.rejects(
       service.readFile({ path: "../outside.md" }),
       (error: unknown) =>
-        error instanceof WorkspaceServiceError && error.code === "invalid-input"
+        error instanceof WikiServiceError && error.code === "invalid-input"
     )
     await assert.rejects(
-      service.readFile({ path: ".amend/workspace.json" }),
+      service.readFile({ path: ".amend/wiki.json" }),
       (error: unknown) =>
-        error instanceof WorkspaceServiceError && error.code === "invalid-input"
+        error instanceof WikiServiceError && error.code === "invalid-input"
     )
     await service.dispose()
   })
 
-  it("explicitly migrates a legacy workspace before opening it", async () => {
+  it("does not open an invalid wiki", async () => {
     const parent = await temporaryDirectory()
     const workspacePath = join(parent, "Legacy Wiki")
     await mkdir(workspacePath)
     const calls: string[] = []
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
-      readWorkspace: async () => {
+      readWiki: async () => {
         calls.push("read")
         throw new Error("Invalid wiki workspace manifest")
       },
-      migrateWorkspace: async () => {
-        calls.push("migrate")
-        return {
-          id: "123e4567-e89b-42d3-a456-426614174012",
-          domain: "Legacy domain",
-          setupStatus: "initialized",
-        }
-      },
-      openIndex: async ({ databasePath }) => {
-        calls.push(databasePath)
-        return createFakeIndex(calls)
-      },
     })
 
-    await service.setWorkspaceHome(parent)
-    const workspace = await service.openWorkspace(workspacePath)
-
-    assert.equal(workspace.domain, "Legacy domain")
-    assert.deepEqual(calls.slice(0, 2), ["read", "migrate"])
-    assert.match(calls[2] ?? "", /426614174012\.sqlite$/)
+    await service.setWikiHome(parent)
+    await assert.rejects(
+      service.openWiki(workspacePath),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "wiki-open-failed"
+    )
+    assert.deepEqual(calls, ["read"])
     await service.dispose()
   })
 
-  it("activates another workspace discovered in the Amend library", async () => {
+  it("activates another wiki discovered in the Amend library", async () => {
     const parent = await temporaryDirectory()
     const firstPath = join(parent, "First")
     const secondPath = join(parent, "Second")
     await Promise.all([mkdir(firstPath), mkdir(secondPath)])
     const calls: string[] = []
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
-      readWorkspace: async ({ workspacePath }) => ({
+      readWiki: async ({ wikiPath: workspacePath }) => ({
         id:
           workspacePath === firstPath
             ? "123e4567-e89b-42d3-a456-426614174020"
@@ -680,12 +629,12 @@ describe("workspace service", () => {
       openIndex: async ({ workspacePath }) =>
         createFakeIndex(calls, workspacePath),
     })
-    await service.setWorkspaceHome(parent)
-    const first = await service.openWorkspace(firstPath)
-    const second = await service.openWorkspace(secondPath)
+    await service.setWikiHome(parent)
+    const first = await service.openWiki(firstPath)
+    const second = await service.openWiki(secondPath)
 
     assert.equal(first.id === second.id, false)
-    assert.equal(service.getCurrentWorkspace()?.id, second.id)
+    assert.equal(service.getCurrentWiki()?.id, second.id)
     await service.dispose()
   })
 
@@ -693,10 +642,10 @@ describe("workspace service", () => {
     const parent = await temporaryDirectory()
     const workspacePath = join(parent, "Moved Wiki")
     await mkdir(workspacePath)
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
-      readWorkspace: async () => ({
+      readWiki: async () => ({
         id: "123e4567-e89b-42d3-a456-426614174031",
         domain: "Replacement",
         setupStatus: "initialized",
@@ -704,25 +653,25 @@ describe("workspace service", () => {
       openIndex: async () => createFakeIndex([]),
     })
 
-    await service.setWorkspaceHome(parent)
-    const home = new WorkspaceHome({ userDataPath: join(parent, "user-data") })
-    await home.setLastActiveWorkspaceId("123e4567-e89b-42d3-a456-426614174030")
+    await service.setWikiHome(parent)
+    const home = new WikiHome({ userDataPath: join(parent, "user-data") })
+    await home.setLastActiveWikiId("123e4567-e89b-42d3-a456-426614174030")
 
-    assert.equal(await service.restoreLastActiveWorkspace(), null)
-    assert.equal(service.getCurrentWorkspace(), null)
-    assert.equal((await home.read())?.lastActiveWorkspaceId, null)
+    assert.equal(await service.restoreLastActiveWiki(), null)
+    assert.equal(service.getCurrentWiki(), null)
+    assert.equal((await home.read())?.lastActiveWikiId, null)
     await service.dispose()
   })
 
-  it("rebuilds a derived index whose stored path predates a workspace move", async () => {
+  it("rebuilds a derived index whose stored path predates a wiki move", async () => {
     const parent = await temporaryDirectory()
     const workspacePath = join(parent, "Moved Wiki")
     await mkdir(workspacePath)
     let openAttempts = 0
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
-      readWorkspace: async () => ({
+      readWiki: async () => ({
         id: "123e4567-e89b-42d3-a456-426614174032",
         domain: "Moved research",
         setupStatus: "ready",
@@ -732,15 +681,15 @@ describe("workspace service", () => {
         if (openAttempts === 1) {
           throw new WikiIndexError(
             "invalid-database",
-            "Wiki index database belongs to another workspace"
+            "Wiki index database belongs to another wiki"
           )
         }
         return createFakeIndex([])
       },
     })
 
-    await service.setWorkspaceHome(parent)
-    const workspace = await service.openWorkspace(workspacePath)
+    await service.setWikiHome(parent)
+    const workspace = await service.openWiki(workspacePath)
 
     assert.equal(workspace.setupStatus, "ready")
     assert.equal(openAttempts, 2)
@@ -752,14 +701,14 @@ describe("workspace service", () => {
     const firstPath = join(parent, "Original Wiki")
     const movedPath = join(parent, "Moved Wiki")
     await Promise.all([mkdir(firstPath), mkdir(movedPath)])
-    const workspaceId = "123e4567-e89b-42d3-a456-426614174033"
+    const wikiId = "123e4567-e89b-42d3-a456-426614174033"
     const calls: string[] = []
     let movedAttempts = 0
-    const service = new WorkspaceService({
+    const service = new WikiService({
       userDataPath: join(parent, "user-data"),
       skillPath: "/app/llm-wiki/SKILL.md",
-      readWorkspace: async () => ({
-        id: workspaceId,
+      readWiki: async () => ({
+        id: wikiId,
         domain: "Moved research",
         setupStatus: "ready",
       }),
@@ -770,17 +719,17 @@ describe("workspace service", () => {
           if (movedAttempts === 1) {
             throw new WikiIndexError(
               "invalid-database",
-              "Wiki index database belongs to another workspace"
+              "Wiki index database belongs to another wiki"
             )
           }
         }
         return createFakeIndex(calls, workspacePath)
       },
     })
-    await service.setWorkspaceHome(parent)
-    await service.openWorkspace(firstPath)
+    await service.setWikiHome(parent)
+    await service.openWiki(firstPath)
 
-    const workspace = await service.openWorkspace(movedPath)
+    const workspace = await service.openWiki(movedPath)
 
     assert.equal(workspace.displayPath, movedPath)
     assert.deepEqual(calls.slice(0, 6), [
@@ -796,8 +745,8 @@ describe("workspace service", () => {
 })
 
 async function waitForTerminalJob(
-  service: WorkspaceService
-): Promise<NonNullable<ReturnType<WorkspaceService["getCurrentIngest"]>>> {
+  service: WikiService
+): Promise<NonNullable<ReturnType<WikiService["getCurrentIngest"]>>> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const job = service.getCurrentIngest()
     if (job && job.status !== "running") return job
@@ -807,14 +756,13 @@ async function waitForTerminalJob(
 }
 
 async function waitForTerminalEvent(
-  events: readonly { workspaceId: string; status: string }[],
-  workspaceId: string
+  events: readonly { wikiId: string; status: string }[],
+  wikiId: string
 ): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (
       events.some(
-        (event) =>
-          event.workspaceId === workspaceId && event.status !== "running"
+        (event) => event.wikiId === wikiId && event.status !== "running"
       )
     ) {
       return

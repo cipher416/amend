@@ -7,7 +7,7 @@ import type {
   AmendError,
   AmendErrorCode,
   CancelIngestInput,
-  CreateWorkspaceInput,
+  CreateWikiInput,
   IngestDocumentInput,
   IngestPastedSourceResult,
   ReadWikiFileInput,
@@ -22,8 +22,8 @@ import type {
   WikiSearchInput,
   WikiSearchResult,
   WikiTagFacet,
-  WorkspaceListItem,
-  WorkspaceSummary,
+  WikiListItem,
+  WikiSummary,
 } from "@workspace/contract"
 import type {
   PiProgressEvent,
@@ -33,16 +33,13 @@ import { openWikiIndex, WikiIndexError } from "@workspace/wiki-engine/index"
 import type { WikiIndex } from "@workspace/wiki-engine/index"
 import { createWikiEngine } from "@workspace/wiki-engine/ingest"
 import type { WikiAgent, WikiEngine } from "@workspace/wiki-engine/ingest"
-import {
-  migrateWorkspace,
-  readWorkspace,
-} from "@workspace/wiki-engine/workspace"
-import type { WikiWorkspace } from "@workspace/wiki-engine/workspace"
+import { readWiki } from "@workspace/wiki-engine/wiki"
+import type { Wiki } from "@workspace/wiki-engine/wiki"
 
-import { WorkspaceHome } from "./workspace-home.ts"
+import { WikiHome } from "./wiki-home.ts"
 
-interface ActiveWorkspace {
-  summary: WorkspaceSummary
+interface ActiveWiki {
+  summary: WikiSummary
   workspacePath: string
   index: WikiIndex
 }
@@ -61,7 +58,7 @@ interface RunningIngest {
   controller: AbortController
 }
 
-interface WorkspaceServiceOptions {
+interface WikiServiceOptions {
   userDataPath: string
   skillPath: string
   createId?: () => string
@@ -74,44 +71,41 @@ interface WorkspaceServiceOptions {
     workspacePath: string
     databasePath: string
   }) => Promise<WikiIndex>
-  readWorkspace?: (input: { workspacePath: string }) => Promise<WikiWorkspace>
-  migrateWorkspace?: (input: {
-    workspacePath: string
-  }) => Promise<WikiWorkspace>
+  readWiki?: (input: { wikiPath: string }) => Promise<Wiki>
 }
 
-export class WorkspaceServiceError extends Error {
+export class WikiServiceError extends Error {
   readonly code: AmendErrorCode
 
   constructor(code: AmendErrorCode, message: string, options?: ErrorOptions) {
     super(message, options)
-    this.name = "WorkspaceServiceError"
+    this.name = "WikiServiceError"
     this.code = code
   }
 }
 
-export class WorkspaceService {
-  private readonly options: WorkspaceServiceOptions
+export class WikiService {
+  private readonly options: WikiServiceOptions
   private readonly createId: () => string
   private readonly now: () => Date
-  private readonly home: WorkspaceHome
+  private readonly home: WikiHome
   private readonly documents = new Map<string, SelectedDocument>()
-  private readonly contexts = new Map<string, ActiveWorkspace>()
+  private readonly contexts = new Map<string, ActiveWiki>()
   private readonly jobs = new Map<string, WikiIngestJob>()
   private readonly jobListeners = new Set<
     (event: WikiIngestChangedEvent) => void
   >()
-  private active: ActiveWorkspace | undefined
+  private active: ActiveWiki | undefined
   private lifecycleOperation: Promise<unknown> | undefined
   private modelOperation: Promise<unknown> | undefined
   private runningIngest: RunningIngest | undefined
   private disposed = false
 
-  constructor(options: WorkspaceServiceOptions) {
+  constructor(options: WikiServiceOptions) {
     this.options = options
     this.createId = options.createId ?? randomUUID
     this.now = options.now ?? (() => new Date())
-    this.home = new WorkspaceHome({ userDataPath: options.userDataPath })
+    this.home = new WikiHome({ userDataPath: options.userDataPath })
   }
 
   subscribeIngestChanged(
@@ -121,43 +115,43 @@ export class WorkspaceService {
     return () => this.jobListeners.delete(listener)
   }
 
-  async setWorkspaceHome(parentPath: string): Promise<void> {
+  async setWikiHome(parentPath: string): Promise<void> {
     this.assertOpen()
-    const canonicalParent = await realpath(resolve(parentPath)).catch((error) => {
-      throw new WorkspaceServiceError(
-        "invalid-location",
-        "The selected Amend home is not available.",
-        { cause: error }
-      )
-    })
+    const canonicalParent = await realpath(resolve(parentPath)).catch(
+      (error) => {
+        throw new WikiServiceError(
+          "invalid-location",
+          "The selected Amend home is not available.",
+          { cause: error }
+        )
+      }
+    )
     await mkdir(join(canonicalParent, ".amend"), { recursive: true })
     await this.home.setParentPath(canonicalParent)
   }
 
-  async getWorkspaceHome(): Promise<{ displayPath: string } | null> {
+  async getWikiHome(): Promise<{ displayPath: string } | null> {
     this.assertOpen()
     const home = await this.home.read()
     return home ? { displayPath: home.parentPath } : null
   }
 
-  async createWorkspace(
-    input: CreateWorkspaceInput
-  ): Promise<WorkspaceSummary> {
+  async createWiki(input: CreateWikiInput): Promise<WikiSummary> {
     this.assertOpen()
     if (this.lifecycleOperation) {
-      throw new WorkspaceServiceError("busy", "Amend is already working.")
+      throw new WikiServiceError("busy", "Amend is already working.")
     }
     const operation = Promise.resolve().then(async () => {
       const home = await this.home.read()
       if (!home) {
-        throw new WorkspaceServiceError(
+        throw new WikiServiceError(
           "invalid-location",
           "Choose an Amend home before creating a wiki."
         )
       }
-      const workspacePath = join(home.workspaceDirectory, input.name)
-      await assertTargetDoesNotExist(workspacePath)
-      return await this.initializeWorkspace(workspacePath, input)
+      const wikiPath = join(home.wikiDirectory, input.name)
+      await assertTargetDoesNotExist(wikiPath)
+      return await this.initializeWiki(wikiPath, input)
     })
     this.lifecycleOperation = operation
     try {
@@ -175,7 +169,7 @@ export class WorkspaceService {
   ): Promise<SourceDocumentSelection> {
     this.assertOpen()
     const path = await realpath(resolve(documentPath)).catch((error) => {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "The selected document is not available.",
         { cause: error }
@@ -187,13 +181,13 @@ export class WorkspaceService {
       !metadata.isFile() ||
       ![".pdf", ".md", ".markdown", ".txt", ".text"].includes(extension)
     ) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "Choose a PDF, Markdown, or text document."
       )
     }
     if (metadata.size > 25_000_000) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "The document must be no larger than 25 MB."
       )
@@ -215,39 +209,36 @@ export class WorkspaceService {
     return { token, displayName, suggestedTitle: title }
   }
 
-  getCurrentWorkspace(): WorkspaceSummary | null {
+  getCurrentWiki(): WikiSummary | null {
     this.assertOpen()
     return this.active?.summary ?? null
   }
 
-  async listWorkspaces(): Promise<readonly WorkspaceListItem[]> {
+  async listWikis(): Promise<readonly WikiListItem[]> {
     this.assertOpen()
-    const workspaces = await this.discoverWorkspaces()
-    return workspaces.map((workspace) => ({
-      id: workspace.id,
-      name: basename(workspace.path),
-      displayPath: workspace.path,
-      active: this.active?.summary.id === workspace.id,
-      running: this.jobs.get(workspace.id)?.status === "running",
+    const wikis = await this.discoverWikis()
+    return wikis.map((wiki) => ({
+      id: wiki.id,
+      name: basename(wiki.path),
+      displayPath: wiki.path,
+      active: this.active?.summary.id === wiki.id,
+      running: this.jobs.get(wiki.id)?.status === "running",
     }))
   }
 
-  async activateWorkspace(workspaceId: string): Promise<WorkspaceSummary> {
+  async activateWiki(wikiId: string): Promise<WikiSummary> {
     this.assertOpen()
     if (this.lifecycleOperation) {
-      throw new WorkspaceServiceError("busy", "Amend is already working.")
+      throw new WikiServiceError("busy", "Amend is already working.")
     }
     const operation = Promise.resolve().then(async () => {
-      const record = (await this.discoverWorkspaces()).find(
-        ({ id }) => id === workspaceId
+      const record = (await this.discoverWikis()).find(
+        ({ id }) => id === wikiId
       )
       if (!record) {
-        throw new WorkspaceServiceError(
-          "invalid-input",
-          "The workspace was not found."
-        )
+        throw new WikiServiceError("invalid-input", "The wiki was not found.")
       }
-      return await this.openAndActivateWorkspace(record.path, record.id)
+      return await this.openAndActivateWiki(record.path, record.id)
     })
     this.lifecycleOperation = operation
     try {
@@ -259,13 +250,13 @@ export class WorkspaceService {
     }
   }
 
-  async openWorkspace(workspacePath: string): Promise<WorkspaceSummary> {
+  async openWiki(wikiPath: string): Promise<WikiSummary> {
     this.assertOpen()
     if (this.lifecycleOperation) {
-      throw new WorkspaceServiceError("busy", "Amend is already working.")
+      throw new WikiServiceError("busy", "Amend is already working.")
     }
     const operation = Promise.resolve().then(() =>
-      this.openAndActivateWorkspace(workspacePath)
+      this.openAndActivateWiki(wikiPath)
     )
     this.lifecycleOperation = operation
     try {
@@ -277,27 +268,27 @@ export class WorkspaceService {
     }
   }
 
-  async restoreLastActiveWorkspace(): Promise<WorkspaceSummary | null> {
+  async restoreLastActiveWiki(): Promise<WikiSummary | null> {
     this.assertOpen()
     if (this.lifecycleOperation) {
-      throw new WorkspaceServiceError("busy", "Amend is already working.")
+      throw new WikiServiceError("busy", "Amend is already working.")
     }
     const operation = Promise.resolve().then(async () => {
       const home = await this.home.read()
-      if (!home?.lastActiveWorkspaceId) return null
-      const record = (await this.discoverWorkspaces()).find(
-        ({ id }) => id === home.lastActiveWorkspaceId
+      if (!home?.lastActiveWikiId) return null
+      const record = (await this.discoverWikis()).find(
+        ({ id }) => id === home.lastActiveWikiId
       )
       if (!record) {
-        await this.home.setLastActiveWorkspaceId(null)
+        await this.home.setLastActiveWikiId(null)
         return null
       }
 
       try {
-        return await this.openAndActivateWorkspace(record.path, record.id)
+        return await this.openAndActivateWiki(record.path, record.id)
       } catch (error) {
-        console.error("[amend] failed to restore the last workspace:", error)
-        await this.home.setLastActiveWorkspaceId(null)
+        console.error("[amend] failed to restore the last wiki:", error)
+        await this.home.setLastActiveWikiId(null)
         return null
       }
     })
@@ -323,11 +314,11 @@ export class WorkspaceService {
     this.assertOpen()
     const active = this.requireActive()
     if (this.modelOperation) {
-      throw new WorkspaceServiceError("busy", "Amend is already working.")
+      throw new WikiServiceError("busy", "Amend is already working.")
     }
     const document = this.documents.get(input.documentToken)
     if (!document || document.ownerId !== ownerId) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "Choose the source document again."
       )
@@ -382,7 +373,7 @@ export class WorkspaceService {
       ([, job]) => job.id === input.jobId
     )
     if (!entry) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "The ingest job was not found."
       )
@@ -390,7 +381,7 @@ export class WorkspaceService {
     const [workspaceId, job] = entry
     if (job.status !== "running") return
     if (!job.cancellable) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "operation-failed",
         "The ingest can no longer be cancelled because its commit has started."
       )
@@ -399,7 +390,7 @@ export class WorkspaceService {
       this.runningIngest?.workspaceId !== workspaceId ||
       this.runningIngest.jobId !== input.jobId
     ) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "The ingest job was not found."
       )
@@ -433,9 +424,9 @@ export class WorkspaceService {
     try {
       return await listWorkspaceFiles(active.workspacePath)
     } catch (error) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "operation-failed",
-        "Workspace files could not be loaded.",
+        "Wiki files could not be loaded.",
         { cause: error }
       )
     }
@@ -445,21 +436,21 @@ export class WorkspaceService {
     this.assertOpen()
     const active = this.requireActive()
     if (!isReadWikiFileInput(input)) {
-      throw new WorkspaceServiceError("invalid-input", "Choose a wiki file.")
+      throw new WikiServiceError("invalid-input", "Choose a wiki file.")
     }
     const { absolutePath, relativePath } = workspaceFilePath(
       active.workspacePath,
       input.path
     )
     const metadata = await lstat(absolutePath).catch((error) => {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "The selected wiki file is not available.",
         { cause: error }
       )
     })
     if (!metadata.isFile()) {
-      throw new WorkspaceServiceError("invalid-input", "Choose a wiki file.")
+      throw new WikiServiceError("invalid-input", "Choose a wiki file.")
     }
     const mediaType = wikiFileMediaType(relativePath)
     if (mediaType === "binary") {
@@ -471,14 +462,14 @@ export class WorkspaceService {
       }
     }
     if (metadata.size > 1_000_000) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "The selected text file is too large to preview."
       )
     }
     const content = (await readFile(absolutePath)).toString("utf8")
     if (content.includes("\0")) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "The selected wiki file is not valid UTF-8 text."
       )
@@ -495,7 +486,7 @@ export class WorkspaceService {
   async refreshIndex(): Promise<WikiIndexRefreshSummary> {
     this.assertOpen()
     if (this.modelOperation) {
-      throw new WorkspaceServiceError("busy", "Amend is already working.")
+      throw new WikiServiceError("busy", "Amend is already working.")
     }
     const active = this.requireActive()
     const operation = Promise.resolve().then(async () => {
@@ -560,10 +551,10 @@ export class WorkspaceService {
     this.jobListeners.clear()
   }
 
-  private async initializeWorkspace(
+  private async initializeWiki(
     workspacePath: string,
-    input: CreateWorkspaceInput
-  ): Promise<WorkspaceSummary> {
+    input: CreateWikiInput
+  ): Promise<WikiSummary> {
     const placeholderAgent: WikiAgent = {
       name: "amend/initializer",
       async run() {
@@ -583,7 +574,7 @@ export class WorkspaceService {
       const canonicalPath = await realpath(wiki.workspacePath)
       index = await this.openWorkspaceIndex(canonicalPath, wiki.id)
       await index.refresh()
-      const summary: WorkspaceSummary = {
+      const summary: WikiSummary = {
         id: wiki.id,
         name: input.name,
         domain: input.domain.trim(),
@@ -591,7 +582,7 @@ export class WorkspaceService {
         commitHash: wiki.commitHash,
         setupStatus: "initialized",
       }
-      await this.setActiveWorkspace({
+      await this.setActiveWiki({
         summary,
         workspacePath: canonicalPath,
         index,
@@ -605,40 +596,42 @@ export class WorkspaceService {
         )
       }
       if (isGitUnavailable(error)) {
-        throw new WorkspaceServiceError(
+        throw new WikiServiceError(
           "git-unavailable",
           "Git is required to create an Amend wiki.",
           { cause: error }
         )
       }
-      if (error instanceof WorkspaceServiceError) throw error
-      throw new WorkspaceServiceError(
-        "workspace-creation-failed",
-        "The wiki workspace could not be created.",
+      if (error instanceof WikiServiceError) throw error
+      throw new WikiServiceError(
+        "wiki-creation-failed",
+        "The wiki could not be created.",
         { cause: error }
       )
     }
   }
 
-  private async openAndActivateWorkspace(
+  private async openAndActivateWiki(
     workspacePath: string,
     expectedId?: string
-  ): Promise<WorkspaceSummary> {
+  ): Promise<WikiSummary> {
     let index: WikiIndex | undefined
     try {
       const canonicalPath = await realpath(resolve(workspacePath))
-      const wiki = await this.readOrMigrateWorkspace(canonicalPath)
+      const wiki = await (this.options.readWiki ?? readWiki)({
+        wikiPath: canonicalPath,
+      })
       if (expectedId !== undefined && wiki.id !== expectedId) {
-        throw new Error("The workspace ID does not match the catalog record")
+        throw new Error("The wiki ID does not match the catalog record")
       }
       const existing = this.contexts.get(wiki.id)
       if (existing?.workspacePath === canonicalPath) {
-        await this.setActiveWorkspace(existing)
+        await this.setActiveWiki(existing)
         return existing.summary
       }
       index = await this.openWorkspaceIndex(canonicalPath, wiki.id, existing)
       const refresh = await index.refresh()
-      const summary: WorkspaceSummary = {
+      const summary: WikiSummary = {
         id: wiki.id,
         name: basename(canonicalPath) || canonicalPath,
         domain: wiki.domain,
@@ -646,7 +639,7 @@ export class WorkspaceService {
         commitHash: refresh.commitHash,
         setupStatus: wiki.setupStatus,
       }
-      await this.setActiveWorkspace({
+      await this.setActiveWiki({
         summary,
         workspacePath: canonicalPath,
         index,
@@ -654,68 +647,55 @@ export class WorkspaceService {
       return summary
     } catch (error) {
       await index?.close().catch(() => undefined)
-      if (error instanceof WorkspaceServiceError) throw error
+      if (error instanceof WikiServiceError) throw error
       if (isGitUnavailable(error)) {
-        throw new WorkspaceServiceError(
+        throw new WikiServiceError(
           "git-unavailable",
           "Git is required to open an Amend wiki.",
           { cause: error }
         )
       }
-      throw new WorkspaceServiceError(
-        "workspace-open-failed",
-        "The wiki workspace could not be opened.",
+      throw new WikiServiceError(
+        "wiki-open-failed",
+        "The wiki could not be opened.",
         { cause: error }
       )
     }
   }
 
-  private async readOrMigrateWorkspace(
-    workspacePath: string
-  ): Promise<WikiWorkspace> {
-    try {
-      return await (this.options.readWorkspace ?? readWorkspace)({
-        workspacePath,
-      })
-    } catch {
-      return await (this.options.migrateWorkspace ?? migrateWorkspace)({
-        workspacePath,
-      })
-    }
-  }
-
-  private async discoverWorkspaces(): Promise<
+  private async discoverWikis(): Promise<
     readonly { id: string; path: string }[]
   > {
     const home = await this.home.read()
     if (!home) return []
     let entries
     try {
-      entries = await readdir(home.workspaceDirectory, { withFileTypes: true })
+      entries = await readdir(home.wikiDirectory, { withFileTypes: true })
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") return []
       throw error
     }
-    const workspaces = await Promise.all(
+    const wikis = await Promise.all(
       entries
         .filter((entry) => entry.isDirectory() && entry.name !== ".amend")
         .map(async (entry) => {
-          const path = await realpath(join(home.workspaceDirectory, entry.name))
-          if (!isPathInside(home.workspaceDirectory, path)) return null
+          const path = await realpath(join(home.wikiDirectory, entry.name))
+          if (!isPathInside(home.wikiDirectory, path)) return null
           try {
-            const wiki = await this.readOrMigrateWorkspace(path)
+            const wiki = await (this.options.readWiki ?? readWiki)({
+              wikiPath: path,
+            })
             return { id: wiki.id, path }
           } catch {
             return null
           }
         })
     )
-    const discovered = workspaces
-      .filter((workspace): workspace is { id: string; path: string } =>
-        Boolean(workspace)
-      )
+    const discovered = wikis.filter(
+      (wiki): wiki is { id: string; path: string } => Boolean(wiki)
+    )
     for (const context of this.contexts.values()) {
-      if (!isPathInside(home.workspaceDirectory, context.workspacePath)) continue
+      if (!isPathInside(home.wikiDirectory, context.workspacePath)) continue
       if (!discovered.some(({ id }) => id === context.summary.id)) {
         discovered.push({ id: context.summary.id, path: context.workspacePath })
       }
@@ -723,8 +703,8 @@ export class WorkspaceService {
     return discovered.sort((left, right) => left.path.localeCompare(right.path))
   }
 
-  private async setActiveWorkspace(candidate: ActiveWorkspace): Promise<void> {
-    await this.home.setLastActiveWorkspaceId(candidate.summary.id)
+  private async setActiveWiki(candidate: ActiveWiki): Promise<void> {
+    await this.home.setLastActiveWikiId(candidate.summary.id)
 
     const replaced = this.contexts.get(candidate.summary.id)
     this.contexts.set(candidate.summary.id, candidate)
@@ -739,7 +719,7 @@ export class WorkspaceService {
   private async openWorkspaceIndex(
     workspacePath: string,
     workspaceId: string,
-    replaced?: ActiveWorkspace
+    replaced?: ActiveWiki
   ): Promise<WikiIndex> {
     const databasePath = indexPath(this.options.userDataPath, workspaceId)
     const open = this.options.openIndex ?? openWikiIndex
@@ -755,7 +735,7 @@ export class WorkspaceService {
 
       // The index is a derived cache. A moved workspace keeps its stable ID but
       // needs a fresh cache because older indexes are bound to the prior path.
-      if (replaced) await this.closeWorkspaceContext(workspaceId, replaced)
+      if (replaced) await this.closeWikiContext(workspaceId, replaced)
       await Promise.all(
         [databasePath, `${databasePath}-shm`, `${databasePath}-wal`].map(
           (path) => rm(path, { force: true })
@@ -765,9 +745,9 @@ export class WorkspaceService {
     }
   }
 
-  private async closeWorkspaceContext(
+  private async closeWikiContext(
     workspaceId: string,
-    context: ActiveWorkspace
+    context: ActiveWiki
   ): Promise<void> {
     if (this.contexts.get(workspaceId) === context) {
       this.contexts.delete(workspaceId)
@@ -779,7 +759,7 @@ export class WorkspaceService {
   }
 
   private async ingest(
-    active: ActiveWorkspace,
+    active: ActiveWiki,
     jobId: string,
     document: SelectedDocument,
     objective: string,
@@ -798,7 +778,7 @@ export class WorkspaceService {
       const engine = this.createEngine(agent)
       const sourceText = await extractDocumentText(document)
       if (Buffer.byteLength(sourceText, "utf8") > 5_000_000) {
-        throw new WorkspaceServiceError(
+        throw new WikiServiceError(
           "invalid-input",
           "The extracted document text must be no larger than 5 MB."
         )
@@ -848,26 +828,22 @@ export class WorkspaceService {
       }
     } catch (error) {
       if (isAbortError(error)) {
-        throw new WorkspaceServiceError(
-          "cancelled",
-          "The ingest was cancelled.",
-          { cause: error }
-        )
+        throw new WikiServiceError("cancelled", "The ingest was cancelled.", {
+          cause: error,
+        })
       }
-      if (error instanceof WorkspaceServiceError) throw error
+      if (error instanceof WikiServiceError) throw error
       console.error("[amend] ingest failed:", error)
       if (isGitUnavailable(error)) {
-        throw new WorkspaceServiceError(
+        throw new WikiServiceError(
           "git-unavailable",
           "Git is required to integrate a source into the wiki.",
           { cause: error }
         )
       }
-      throw new WorkspaceServiceError(
-        "ingest-failed",
-        ingestFailureMessage(error),
-        { cause: error }
-      )
+      throw new WikiServiceError("ingest-failed", ingestFailureMessage(error), {
+        cause: error,
+      })
     }
   }
 
@@ -882,7 +858,7 @@ export class WorkspaceService {
     try {
       settings = await readPiAgentSettings()
     } catch (error) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "pi-configuration-missing",
         "Configure a default Pi provider and model before ingesting a source.",
         { cause: error }
@@ -899,19 +875,16 @@ export class WorkspaceService {
     return this.options.createEngine?.(agent) ?? createWikiEngine({ agent })
   }
 
-  private requireActive(): ActiveWorkspace {
+  private requireActive(): ActiveWiki {
     if (!this.active) {
-      throw new WorkspaceServiceError(
-        "no-active-workspace",
-        "Create a wiki workspace first."
-      )
+      throw new WikiServiceError("no-active-wiki", "Create a wiki first.")
     }
     return this.active
   }
 
   private assertOpen(): void {
     if (this.disposed) {
-      throw new WorkspaceServiceError("cancelled", "Amend is shutting down.")
+      throw new WikiServiceError("cancelled", "Amend is shutting down.")
     }
   }
 
@@ -940,7 +913,7 @@ export class WorkspaceService {
     if (!job || job.id !== jobId) return
     const context = this.contexts.get(workspaceId)
     if (context) {
-      const updated: ActiveWorkspace = {
+      const updated: ActiveWiki = {
         ...context,
         summary: {
           ...context.summary,
@@ -987,7 +960,7 @@ export class WorkspaceService {
     if (!job) return
     for (const listener of this.jobListeners) {
       try {
-        listener({ workspaceId, job })
+        listener({ wikiId: workspaceId, job })
       } catch {
         // Renderer delivery must not affect the main-owned job.
       }
@@ -1067,7 +1040,7 @@ function workspaceFilePath(
       .split(/[/\\]/)
       .some((part) => hiddenWorkspaceEntries.has(part) || part.startsWith("."))
   ) {
-    throw new WorkspaceServiceError("invalid-input", "Choose a wiki file.")
+    throw new WikiServiceError("invalid-input", "Choose a wiki file.")
   }
   return { absolutePath, relativePath: relativePath.replaceAll("\\", "/") }
 }
@@ -1086,15 +1059,15 @@ async function assertTargetDoesNotExist(path: string): Promise<void> {
     await lstat(path)
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") return
-    throw new WorkspaceServiceError(
+    throw new WikiServiceError(
       "invalid-location",
-      "The workspace location could not be checked.",
+      "The wiki location could not be checked.",
       { cause: error }
     )
   }
-  throw new WorkspaceServiceError(
+  throw new WikiServiceError(
     "invalid-location",
-    "A file or folder already exists at that workspace location."
+    "A file or folder already exists at that wiki location."
   )
 }
 
@@ -1143,14 +1116,14 @@ async function extractDocumentText(
   } else {
     text = data.toString("utf8").replace(/^\uFEFF/, "")
     if (text.includes("\0")) {
-      throw new WorkspaceServiceError(
+      throw new WikiServiceError(
         "invalid-input",
         "The selected document is not valid UTF-8 text."
       )
     }
   }
   if (!text.trim()) {
-    throw new WorkspaceServiceError(
+    throw new WikiServiceError(
       "invalid-input",
       "The selected document does not contain extractable text."
     )
@@ -1181,7 +1154,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 function toAmendError(error: unknown): AmendError {
-  if (error instanceof WorkspaceServiceError) {
+  if (error instanceof WikiServiceError) {
     return { code: error.code, message: error.message }
   }
   return {
@@ -1193,8 +1166,8 @@ function toAmendError(error: unknown): AmendError {
 function indexOperationError(
   error: unknown,
   message: string
-): WorkspaceServiceError {
-  return new WorkspaceServiceError(
+): WikiServiceError {
+  return new WikiServiceError(
     error instanceof WikiIndexError && error.code === "invalid-query"
       ? "invalid-input"
       : "index-failed",

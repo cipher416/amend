@@ -60,9 +60,7 @@ export function parseMarkdownDocument(content: string): MarkdownDocument {
   }
 
   return {
-    body: normalizedContent
-      .slice(end + "\n---\n".length)
-      .replace(/^\n/, ""),
+    body: normalizedContent.slice(end + "\n---\n".length).replace(/^\n/, ""),
     metadata,
   }
 }
@@ -70,12 +68,12 @@ export function parseMarkdownDocument(content: string): MarkdownDocument {
 export function WikiFileViewer({
   file,
   document,
-  workspaceId,
+  wikiId,
   files,
 }: {
   file: WikiFileContent
   document?: MarkdownDocument
-  workspaceId: string
+  wikiId: string
   files: readonly WikiFileTreeItem[]
 }) {
   if (file.mediaType === "binary") {
@@ -92,20 +90,20 @@ export function WikiFileViewer({
     return (
       <article className="text-card-foreground">
         {document ? (
-          <DocumentMetadata document={document} workspaceId={workspaceId} />
+          <DocumentMetadata document={document} wikiId={wikiId} />
         ) : null}
         <Streamdown
           mode="static"
           className="space-y-5 text-[0.9375rem] leading-7 text-foreground [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_h1]:mt-0 [&_h1]:text-3xl [&_h1]:font-medium [&_h1]:tracking-tight [&_h2]:mt-7 [&_h2]:text-2xl [&_h2]:font-medium [&_h2]:tracking-tight [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-medium [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:scroll-fade-x [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_ul]:list-disc [&_ul]:pl-6"
-          components={{ a: WorkspaceMarkdownLink }}
+          components={{ a: WikiMarkdownLink }}
           rehypePlugins={[defaultRehypePlugins.sanitize]}
           urlTransform={(url) =>
-            workspaceFileRoute(url) || isSafeExternalUrl(url) ? url : null
+            wikiFileRoute(url) || isSafeExternalUrl(url) ? url : null
           }
         >
           {resolveWikiLinks(
             document?.body ?? file.content ?? "",
-            workspaceId,
+            wikiId,
             files
           )}
         </Streamdown>
@@ -140,10 +138,10 @@ function unquoteFrontmatterValue(value: string): string {
 
 function DocumentMetadata({
   document,
-  workspaceId,
+  wikiId,
 }: {
   document: MarkdownDocument
-  workspaceId: string
+  wikiId: string
 }) {
   const { created, updated, type, tags, sources } = document.metadata
   if (!created && !updated && !type && !tags.length && !sources.length)
@@ -193,8 +191,8 @@ function DocumentMetadata({
                 {index ? <span className="mr-1">,</span> : null}
                 <Link
                   className="text-foreground underline decoration-muted-foreground/40 underline-offset-4 transition-colors hover:decoration-foreground"
-                  to="/workspace/$workspaceId/$"
-                  params={{ workspaceId, _splat: source }}
+                  to="/wiki/$wikiId/$"
+                  params={{ wikiId, _splat: source }}
                 >
                   {source}
                 </Link>
@@ -209,7 +207,7 @@ function DocumentMetadata({
 
 function resolveWikiLinks(
   content: string,
-  workspaceId: string,
+  wikiId: string,
   files: readonly WikiFileTreeItem[]
 ): string {
   const markdownFiles = collectMarkdownFiles(files)
@@ -226,7 +224,7 @@ function resolveWikiLinks(
         ? `#${encodeURIComponent(rawFragment.trim())}`
         : ""
       const label = escapeMarkdownLinkLabel((rawLabel ?? rawTarget).trim())
-      return `[${label}](${workspaceFileHref(workspaceId, matches[0])}${fragment})`
+      return `[${label}](${wikiFileHref(wikiId, matches[0])}${fragment})`
     }
   )
 }
@@ -249,17 +247,17 @@ function collectMarkdownFiles(
   return files
 }
 
-function workspaceFileHref(workspaceId: string, path: string): string {
+function wikiFileHref(wikiId: string, path: string): string {
   const encodedPath = path.split("/").map(encodeURIComponent).join("/")
-  return `/workspace/${encodeURIComponent(workspaceId)}/${encodedPath}`
+  return `/wiki/${encodeURIComponent(wikiId)}/${encodedPath}`
 }
 
-type WorkspaceMarkdownLinkComponent = Exclude<
+type WikiMarkdownLinkComponent = Exclude<
   Components["a"],
   keyof JSX.IntrinsicElements | undefined
 >
 
-const WorkspaceMarkdownLink: WorkspaceMarkdownLinkComponent = ({
+const WikiMarkdownLink: WikiMarkdownLinkComponent = ({
   href,
   onClick,
   node: _node,
@@ -267,7 +265,7 @@ const WorkspaceMarkdownLink: WorkspaceMarkdownLinkComponent = ({
   ...props
 }) => {
   const navigate = useNavigate()
-  const target = href ? workspaceFileRoute(href) : undefined
+  const target = href ? wikiFileRoute(href) : undefined
   if (!target) {
     return (
       <a
@@ -296,9 +294,9 @@ const WorkspaceMarkdownLink: WorkspaceMarkdownLinkComponent = ({
         }
         event.preventDefault()
         void navigate({
-          to: "/workspace/$workspaceId/$",
+          to: "/wiki/$wikiId/$",
           params: {
-            workspaceId: target.workspaceId,
+            wikiId: target.wikiId,
             _splat: target.path,
           },
           hash: target.hash,
@@ -309,16 +307,16 @@ const WorkspaceMarkdownLink: WorkspaceMarkdownLinkComponent = ({
   )
 }
 
-function workspaceFileRoute(
+function wikiFileRoute(
   href: string
-): { workspaceId: string; path: string; hash: string } | undefined {
+): { wikiId: string; path: string; hash: string } | undefined {
   if (!href.startsWith("/") || href.startsWith("//")) return undefined
   try {
     const url = new URL(href, "https://amend.invalid")
     const segments = url.pathname.split("/").filter(Boolean)
-    if (segments[0] !== "workspace" || segments.length < 3) return undefined
+    if (segments[0] !== "wiki" || segments.length < 3) return undefined
     return {
-      workspaceId: decodeURIComponent(segments[1]),
+      wikiId: decodeURIComponent(segments[1]),
       path: segments.slice(2).map(decodeURIComponent).join("/"),
       hash: url.hash.slice(1),
     }

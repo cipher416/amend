@@ -1,12 +1,12 @@
 import type { AmendApi } from "@workspace/contract"
 import { describe, expect, it, vi } from "vitest"
 
-import { readCurrentWorkspace, readWorkspaceHome } from "./workspace-queries"
+import { readCurrentWiki, readWikiHome } from "./wiki-queries"
 
-describe("readCurrentWorkspace", () => {
-  it("preserves IPC failures instead of treating them as no active workspace", async () => {
+describe("readCurrentWiki", () => {
+  it("preserves IPC failures instead of treating them as no active wiki", async () => {
     const api = {
-      workspaces: {
+      wikis: {
         current: vi.fn(async () => ({
           ok: false as const,
           error: {
@@ -17,14 +17,14 @@ describe("readCurrentWorkspace", () => {
       },
     } as unknown as AmendApi
 
-    await expect(readCurrentWorkspace(api)).rejects.toThrow("IPC unavailable")
+    await expect(readCurrentWiki(api)).rejects.toThrow("IPC unavailable")
   })
 })
 
-describe("readWorkspaceHome", () => {
+describe("readWikiHome", () => {
   it("returns the one configured Amend home", async () => {
     const api = {
-      workspaces: {
+      wikis: {
         home: vi.fn(async () => ({
           ok: true as const,
           value: { displayPath: "/research" },
@@ -32,7 +32,7 @@ describe("readWorkspaceHome", () => {
       },
     } as unknown as AmendApi
 
-    await expect(readWorkspaceHome(api)).resolves.toEqual({
+    await expect(readWikiHome(api)).resolves.toEqual({
       displayPath: "/research",
     })
   })

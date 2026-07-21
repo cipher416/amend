@@ -2,44 +2,41 @@ import { useQuery } from "@tanstack/react-query"
 import { Navigate, createFileRoute, useRouter } from "@tanstack/react-router"
 
 import { errorMessage, useAmendApi } from "@/lib/amend-client"
-import {
-  readCurrentWorkspace,
-  workspaceCurrentKey,
-} from "@/lib/workspace-queries"
+import { readCurrentWiki, wikiCurrentKey } from "@/lib/wiki-queries"
 
-export const Route = createFileRoute("/workspace/")({
-  component: WorkspaceIndexRoute,
+export const Route = createFileRoute("/wiki/")({
+  component: WikiIndexRoute,
 })
 
-function WorkspaceIndexRoute() {
+function WikiIndexRoute() {
   const desktop = useAmendApi()
   const queryClient = useRouter().options.context.queryClient
-  const currentWorkspace = useQuery(
+  const currentWiki = useQuery(
     {
-      queryKey: workspaceCurrentKey,
-      queryFn: () => readCurrentWorkspace(requireDesktop(desktop)),
+      queryKey: wikiCurrentKey,
+      queryFn: () => readCurrentWiki(requireDesktop(desktop)),
       enabled: Boolean(desktop),
     },
     queryClient
   )
 
-  if (desktop === null || currentWorkspace.data === null) {
-    return <Navigate to="/" search={{ createWorkspace: false }} />
+  if (desktop === null || currentWiki.data === null) {
+    return <Navigate to="/" search={{ createWiki: false }} />
   }
-  if (currentWorkspace.error) {
+  if (currentWiki.error) {
     return (
       <main className="grid min-h-svh place-items-center bg-background p-6 text-foreground">
         <p className="max-w-sm text-sm text-muted-foreground">
-          {errorMessage(currentWorkspace.error)}
+          {errorMessage(currentWiki.error)}
         </p>
       </main>
     )
   }
-  if (currentWorkspace.data) {
+  if (currentWiki.data) {
     return (
       <Navigate
-        to="/workspace/$workspaceId"
-        params={{ workspaceId: currentWorkspace.data.id }}
+        to="/wiki/$wikiId"
+        params={{ wikiId: currentWiki.data.id }}
         replace
       />
     )

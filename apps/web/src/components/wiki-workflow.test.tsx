@@ -10,8 +10,8 @@ import type {
   PiLoginEvent,
   WikiIngestChangedEvent,
   WikiIngestJob,
-  WorkspaceListItem,
-  WorkspaceSummary,
+  WikiListItem,
+  WikiSummary,
 } from "@workspace/contract"
 import type { ButtonHTMLAttributes } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -44,6 +44,13 @@ vi.mock("@workspace/ui/components/button", () => ({
 }))
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn()
+  globalThis.ResizeObserver = class ResizeObserver {
+    constructor(_callback: ResizeObserverCallback) {}
+    observe(_target: Element) {}
+    unobserve(_target: Element) {}
+    disconnect() {}
+  }
   routeHarness.queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -57,7 +64,7 @@ afterEach(() => {
 })
 
 describe("first source workflow", () => {
-  it("creates a workspace and builds a wiki from its first document", async () => {
+  it("creates a wiki from its first document", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
     window.amend = api
@@ -66,11 +73,11 @@ describe("first source workflow", () => {
     await createWiki(user)
 
     await screen.findByText("Wiki ready")
-    expect(api.workspaces.create).toHaveBeenCalledWith({
+    expect(api.wikis.create).toHaveBeenCalledWith({
       name: "Reliability Wiki",
       domain: "Database reliability engineering",
     })
-    expect(api.workspaces.chooseHome).toHaveBeenCalledOnce()
+    expect(api.wikis.chooseHome).toHaveBeenCalledOnce()
     expect(api.wiki.startIngest).toHaveBeenCalledWith({
       documentToken: "document_1234567890",
       objective: "Capture recovery ordering",
@@ -103,7 +110,7 @@ describe("first source workflow", () => {
 
   it("reconnects to a running main-process ingest after a renderer reload", async () => {
     const api = createDesktopApi({
-      workspace: workspaceSummary,
+      wiki: wikiSummary,
       job: createJob({
         status: "running",
         phase: "writing",
@@ -117,13 +124,13 @@ describe("first source workflow", () => {
     await screen.findByText("Writing and linking wiki pages")
     expect(screen.getByText("Building your wiki")).toBeDefined()
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDefined()
-    expect(api.workspaces.current).toHaveBeenCalledOnce()
+    expect(api.wikis.current).toHaveBeenCalledOnce()
     expect(api.wiki.currentIngest).toHaveBeenCalledOnce()
   })
 
-  it("restores a completed workspace without returning to source setup", async () => {
+  it("restores a completed wiki without returning to source setup", async () => {
     const api = createDesktopApi({
-      workspace: { ...workspaceSummary, setupStatus: "ready" },
+      wiki: { ...wikiSummary, setupStatus: "ready" },
     })
     window.amend = api
     render(<WikiWorkflow />)
@@ -132,26 +139,26 @@ describe("first source workflow", () => {
     expect(
       screen.getByText("Your existing wiki is ready to browse.")
     ).toBeDefined()
-    expect(screen.queryByText("Create a knowledge base")).toBeNull()
+    expect(screen.queryByRole("heading", { name: "Create wiki" })).toBeNull()
   })
 
-  it("starts sibling creation even when a workspace is already active", async () => {
+  it("starts sibling creation even when a wiki is already active", async () => {
     const api = createDesktopApi({
-      workspace: { ...workspaceSummary, setupStatus: "ready" },
+      wiki: { ...wikiSummary, setupStatus: "ready" },
     })
     window.amend = api
-    render(<WikiWorkflow createWorkspace />)
+    render(<WikiWorkflow createWiki />)
 
-    await screen.findByText("Create a knowledge base")
+    await screen.findByRole("heading", { name: "Create wiki" })
   })
 
-  it("creates a sibling workspace only after its first source is selected", async () => {
+  it("creates a sibling wiki only after its first source is selected", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi({
-      workspace: { ...workspaceSummary, setupStatus: "ready" },
+      wiki: { ...wikiSummary, setupStatus: "ready" },
     })
     api.wiki.registerDocument = vi.fn(async () => {
-      expect(api.workspaces.create).not.toHaveBeenCalled()
+      expect(api.wikis.create).not.toHaveBeenCalled()
       return success({
         token: "document_1234567890",
         displayName: "write-ahead-logging.pdf",
@@ -159,11 +166,24 @@ describe("first source workflow", () => {
       })
     })
     window.amend = api
-    render(<WikiWorkflow createWorkspace />)
+    render(<WikiWorkflow createWiki />)
 
     await createWiki(user)
 
     expect(api.wiki.startIngest).toHaveBeenCalledOnce()
+  })
+
+  it("shows the configured Amend home read-only when creating a sibling wiki", async () => {
+    const api = createDesktopApi({
+      wiki: { ...wikiSummary, setupStatus: "ready" },
+      home: { displayPath: "/research" },
+    })
+    window.amend = api
+    render(<WikiWorkflow createWiki />)
+
+    const home = await screen.findByLabelText("Amend home")
+    expect(home.tagName).toBe("P")
+    expect(screen.queryByRole("button", { name: "Amend home" })).toBeNull()
   })
 
   it("explains that the browser scaffold cannot access local wiki data", async () => {
@@ -172,26 +192,19 @@ describe("first source workflow", () => {
     await screen.findByText("Your wiki lives on your machine.")
   })
 
-  it("switches between known workspaces in the app shell", async () => {
-    const user = userEvent.setup()
+  it("renders the active wiki in the app shell", async () => {
     const api = createDesktopApi({
-      workspace: { ...workspaceSummary, setupStatus: "ready" },
-      knownWorkspaces: [
-        { ...workspaceSummary, setupStatus: "ready" },
-        secondWorkspaceSummary,
+      wiki: { ...wikiSummary, setupStatus: "ready" },
+      knownWikis: [
+        { ...wikiSummary, setupStatus: "ready" },
+        secondWikiSummary,
       ],
     })
     window.amend = api
     render(<WikiWorkflow />)
 
     await screen.findByText("Wiki ready")
-    const switcher = await screen.findByLabelText("Workspace")
-    await user.selectOptions(switcher, secondWorkspaceSummary.id)
-
-    expect(api.workspaces.activate).toHaveBeenCalledWith({
-      workspaceId: secondWorkspaceSummary.id,
-    })
-    await screen.findByText(secondWorkspaceSummary.displayPath)
+    await screen.findByText(wikiSummary.displayPath)
   })
 })
 
@@ -209,7 +222,7 @@ describe("Pi connection gate", () => {
     render(<WikiWorkflow />)
 
     await screen.findByText("Connect a model provider")
-    expect(screen.queryByText("Create a knowledge base")).toBeNull()
+    expect(screen.queryByRole("heading", { name: "Create wiki" })).toBeNull()
 
     await user.click(
       screen.getByRole("button", { name: "Or connect with an API key" })
@@ -219,23 +232,25 @@ describe("Pi connection gate", () => {
     await user.type(screen.getByLabelText("API key"), "sk-test-key")
     await user.click(screen.getByRole("button", { name: "Save and continue" }))
 
-    await screen.findByLabelText("Default model")
+    const modelPicker = await screen.findByRole("combobox", {
+      name: "Default model",
+    })
     expect(api.providers.connectWithApiKey).toHaveBeenCalledWith({
       provider: "zai",
       apiKey: "sk-test-key",
     })
 
-    await user.selectOptions(
-      screen.getByLabelText("Default model"),
-      "glm-5-turbo"
-    )
+    await user.click(modelPicker)
+    const modelSearch = await screen.findByPlaceholderText("Search models...")
+    expect(document.activeElement).toBe(modelSearch)
+    await user.keyboard("{ArrowDown}{Enter}")
     await user.click(screen.getByRole("button", { name: "Continue" }))
 
     expect(api.providers.setDefaultModel).toHaveBeenCalledWith({
       provider: "zai",
       model: "glm-5-turbo",
     })
-    await screen.findByText("Create a knowledge base")
+    await screen.findByRole("heading", { name: "Create wiki" })
   })
 
   it("loads the provider models once OAuth completes", async () => {
@@ -255,6 +270,9 @@ describe("Pi connection gate", () => {
       api.emitOAuthEvent({ loginId: "login-id", type: "completed" })
     })
 
+    await user.click(
+      await screen.findByRole("combobox", { name: "Default model" })
+    )
     await screen.findByRole("option", { name: "Claude Sonnet" })
     expect(api.providers.listModels).toHaveBeenCalledOnce()
     expect(api.providers.listModels).toHaveBeenCalledWith({
@@ -269,24 +287,25 @@ type MockAmendApi = AmendApi & {
 
 function createDesktopApi(
   options: {
-    workspace?: WorkspaceSummary
+    wiki?: WikiSummary
     job?: WikiIngestJob
     index?: IngestPastedSourceResult["index"]
     piConfigured?: boolean
-    knownWorkspaces?: readonly WorkspaceSummary[]
+    knownWikis?: readonly WikiSummary[]
+    home?: { displayPath: string }
   } = {}
 ): MockAmendApi {
-  let workspace = options.workspace ?? null
+  let wiki = options.wiki ?? null
   let currentJob = options.job ?? null
-  const knownWorkspaces = [...(options.knownWorkspaces ?? [])]
-  if (workspace && !knownWorkspaces.some(({ id }) => id === workspace?.id)) {
-    knownWorkspaces.push(workspace)
+  const knownWikis = [...(options.knownWikis ?? [])]
+  if (wiki && !knownWikis.some(({ id }) => id === wiki?.id)) {
+    knownWikis.push(wiki)
   }
-  const workspaceItems: WorkspaceListItem[] = knownWorkspaces.map((candidate) =>
+  const wikiItems: WikiListItem[] = knownWikis.map((candidate) =>
     listItem(
       candidate,
-      candidate.id === workspace?.id,
-      candidate.id === workspace?.id && currentJob?.status === "running"
+      candidate.id === wiki?.id,
+      candidate.id === wiki?.id && currentJob?.status === "running"
     )
   )
   const listeners = new Set<(event: WikiIngestChangedEvent) => void>()
@@ -313,25 +332,25 @@ function createDesktopApi(
         return () => piListeners.delete(listener)
       }),
     },
-    workspaces: {
+    wikis: {
       chooseHome: vi.fn(async () => success({ displayPath: "/research" })),
-      home: vi.fn(async () => success(null)),
+      home: vi.fn(async () => success(options.home ?? null)),
       create: vi.fn(async () => {
-        workspace = workspaceSummary
-        upsertWorkspaceItem(workspaceItems, workspace, true, false)
-        return success(workspaceSummary)
+        wiki = wikiSummary
+        upsertWikiItem(wikiItems, wiki, true, false)
+        return success(wikiSummary)
       }),
-      current: vi.fn(async () => success(workspace)),
-      list: vi.fn(async () => success(workspaceItems)),
-      activate: vi.fn(async ({ workspaceId }) => {
-        const summary = knownWorkspaces.find(({ id }) => id === workspaceId)
+      current: vi.fn(async () => success(wiki)),
+      list: vi.fn(async () => success(wikiItems)),
+      activate: vi.fn(async ({ wikiId }) => {
+        const summary = knownWikis.find(({ id }) => id === wikiId)
         if (summary) {
-          workspace = summary
-          for (const candidate of workspaceItems) {
-            candidate.active = candidate.id === workspaceId
+          wiki = summary
+          for (const candidate of wikiItems) {
+            candidate.active = candidate.id === wikiId
           }
         }
-        return success(workspace ?? workspaceSummary)
+        return success(wiki ?? wikiSummary)
       }),
     },
     wiki: {
@@ -357,10 +376,10 @@ function createDesktopApi(
           cancellable: false,
           result: ingestResult(options.index),
         })
-        if (workspace) {
-          upsertWorkspaceItem(workspaceItems, workspace, true, false)
+        if (wiki) {
+          upsertWikiItem(wikiItems, wiki, true, false)
           for (const listener of listeners) {
-            listener({ workspaceId: workspace.id, job: currentJob })
+            listener({ wikiId: wiki.id, job: currentJob })
           }
         }
         return success({ jobId: currentJob.id })
@@ -384,9 +403,9 @@ function createDesktopApi(
               index: { status: "ready", summary },
             },
           }
-          if (workspace) {
+          if (wiki) {
             for (const listener of listeners) {
-              listener({ workspaceId: workspace.id, job: currentJob })
+              listener({ wikiId: wiki.id, job: currentJob })
             }
           }
         }
@@ -444,8 +463,8 @@ function createDesktopApi(
   return api
 }
 
-const workspaceSummary: WorkspaceSummary = {
-  id: "workspace-id",
+const wikiSummary: WikiSummary = {
+  id: "wiki-id",
   name: "Reliability Wiki",
   domain: "Database reliability engineering",
   displayPath: "/research/Reliability Wiki",
@@ -453,8 +472,8 @@ const workspaceSummary: WorkspaceSummary = {
   setupStatus: "initialized",
 }
 
-const secondWorkspaceSummary: WorkspaceSummary = {
-  id: "second-workspace-id",
+const secondWikiSummary: WikiSummary = {
+  id: "second-wiki-id",
   name: "Second Wiki",
   domain: "Compiler research",
   displayPath: "/research/Second Wiki",
@@ -501,13 +520,15 @@ function createJob(
 async function createWiki(
   user: ReturnType<typeof userEvent.setup>
 ): Promise<void> {
-  await screen.findByText("Create a knowledge base")
-  await user.type(screen.getByLabelText("Workspace name"), "Reliability Wiki")
+  await screen.findByRole("heading", { name: "Create wiki" })
+  await user.type(screen.getByLabelText("Wiki name"), "Reliability Wiki")
   await user.type(
     screen.getByLabelText("Domain"),
     "Database reliability engineering"
   )
-  await user.click(screen.getByRole("button", { name: "Amend home" }))
+  await user.click(
+    screen.getByRole("button", { name: "Amend home" })
+  )
   await screen.findAllByText("/research")
   const input = document.querySelector<HTMLInputElement>('input[type="file"]')
   if (!input) throw new Error("Expected the document file input")
@@ -530,27 +551,27 @@ function success<T>(value: T): AmendResult<T> {
 }
 
 function listItem(
-  workspace: WorkspaceSummary,
+  wiki: WikiSummary,
   active: boolean,
   running: boolean
-): WorkspaceListItem {
+): WikiListItem {
   return {
-    id: workspace.id,
-    name: workspace.name,
-    displayPath: workspace.displayPath,
+    id: wiki.id,
+    name: wiki.name,
+    displayPath: wiki.displayPath,
     active,
     running,
   }
 }
 
-function upsertWorkspaceItem(
-  items: WorkspaceListItem[],
-  workspace: WorkspaceSummary,
+function upsertWikiItem(
+  items: WikiListItem[],
+  wiki: WikiSummary,
   active: boolean,
   running: boolean
 ): void {
-  const item = listItem(workspace, active, running)
-  const index = items.findIndex(({ id }) => id === workspace.id)
+  const item = listItem(wiki, active, running)
+  const index = items.findIndex(({ id }) => id === wiki.id)
   if (index === -1) items.push(item)
   else items[index] = item
 }

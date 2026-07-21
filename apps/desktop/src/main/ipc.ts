@@ -1,7 +1,7 @@
 import {
-  isActivateWorkspaceInput,
+  isActivateWikiInput,
   isCancelIngestInput,
-  isCreateWorkspaceInput,
+  isCreateWikiInput,
   isIngestDocumentInput,
   isPiCancelLoginInput,
   isPiListModelsInput,
@@ -20,8 +20,8 @@ import type { BrowserWindow, IpcMainInvokeEvent } from "electron"
 
 import type { PiCredentialService } from "./pi-credential-service"
 import { isAllowedIpcSender } from "./security"
-import { WorkspaceServiceError } from "./workspace-service"
-import type { WorkspaceService } from "./workspace-service"
+import { WikiServiceError } from "./wiki-service"
+import type { WikiService } from "./wiki-service"
 
 interface IpcAuthContext {
   allowedOrigin: string
@@ -29,7 +29,7 @@ interface IpcAuthContext {
 }
 
 interface WikiIpcOptions extends IpcAuthContext {
-  service: WorkspaceService
+  service: WikiService
 }
 
 interface PiIpcOptions extends IpcAuthContext {
@@ -58,7 +58,7 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
   })
 
   ipcMain.handle(
-    amendChannels.chooseWorkspaceHome,
+    amendChannels.chooseWikiHome,
     authorized(options, async () => {
       const window = options.getWindow()
       if (!window) return failure("unauthorized", "The window is unavailable.")
@@ -69,51 +69,50 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
       })
       if (selection.canceled || !selection.filePaths[0]) return success(null)
       return await attempt(async () => {
-        await options.service.setWorkspaceHome(selection.filePaths[0])
-        return (await options.service.getWorkspaceHome())!
+        await options.service.setWikiHome(selection.filePaths[0])
+        return (await options.service.getWikiHome())!
       })
     })
   )
 
   ipcMain.handle(
-    amendChannels.getWorkspaceHome,
+    amendChannels.getWikiHome,
     authorized(
       options,
-      async () => await attempt(async () => options.service.getWorkspaceHome())
+      async () => await attempt(async () => options.service.getWikiHome())
     )
   )
 
   ipcMain.handle(
-    amendChannels.createWorkspace,
+    amendChannels.createWiki,
     authorized(options, async (_event, input: unknown) => {
-      if (!isCreateWorkspaceInput(input)) return invalidInput()
-      return await attempt(async () => options.service.createWorkspace(input))
+      if (!isCreateWikiInput(input)) return invalidInput()
+      return await attempt(async () => options.service.createWiki(input))
     })
   )
 
   ipcMain.handle(
-    amendChannels.getCurrentWorkspace,
+    amendChannels.getCurrentWiki,
     authorized(
       options,
-      async () =>
-        await attempt(async () => options.service.getCurrentWorkspace())
+      async () => await attempt(async () => options.service.getCurrentWiki())
     )
   )
 
   ipcMain.handle(
-    amendChannels.listWorkspaces,
+    amendChannels.listWikis,
     authorized(
       options,
-      async () => await attempt(async () => options.service.listWorkspaces())
+      async () => await attempt(async () => options.service.listWikis())
     )
   )
 
   ipcMain.handle(
-    amendChannels.activateWorkspace,
+    amendChannels.activateWiki,
     authorized(options, async (_event, input: unknown) => {
-      if (!isActivateWorkspaceInput(input)) return invalidInput()
+      if (!isActivateWikiInput(input)) return invalidInput()
       return await attempt(async () =>
-        options.service.activateWorkspace(input.workspaceId)
+        options.service.activateWiki(input.wikiId)
       )
     })
   )
@@ -226,12 +225,12 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
   return () => {
     unsubscribeIngest()
     for (const channel of [
-      amendChannels.chooseWorkspaceHome,
-      amendChannels.getWorkspaceHome,
-      amendChannels.createWorkspace,
-      amendChannels.getCurrentWorkspace,
-      amendChannels.listWorkspaces,
-      amendChannels.activateWorkspace,
+      amendChannels.chooseWikiHome,
+      amendChannels.getWikiHome,
+      amendChannels.createWiki,
+      amendChannels.getCurrentWiki,
+      amendChannels.listWikis,
+      amendChannels.activateWiki,
       amendChannels.chooseSourceDocument,
       amendChannels.registerSourceDocument,
       amendChannels.startIngest,
@@ -398,7 +397,7 @@ async function attempt<T>(
   try {
     return success(await operation())
   } catch (error) {
-    if (error instanceof WorkspaceServiceError) {
+    if (error instanceof WikiServiceError) {
       return failure(error.code, error.message)
     }
     return failure("operation-failed", "The operation could not be completed.")

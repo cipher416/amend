@@ -258,7 +258,7 @@ describe("Pi wiki agent", () => {
     expect(lint).toHaveBeenCalledTimes(2)
   })
 
-  it("confines SDK file tools to the wiki workspace", async () => {
+  it("confines SDK file tools to the wiki", async () => {
     const parent = await mkdtemp(join(tmpdir(), "amend-pi-workspace-"))
     const workspacePath = join(parent, "wiki\u00a0space")
     await mkdir(workspacePath)
@@ -300,10 +300,10 @@ describe("Pi wiki agent", () => {
     ).resolves.toBeDefined()
     await expect(
       readTool?.execute("call-1", { path: "/etc/passwd" })
-    ).rejects.toThrow("outside the wiki workspace")
+    ).rejects.toThrow("outside the wiki")
     await expect(
       readTool?.execute("call-file-url", { path: "file:///etc/passwd" })
-    ).rejects.toThrow("outside the wiki workspace")
+    ).rejects.toThrow("outside the wiki")
     await expect(
       readTool?.execute("call-git", { path: ".git" })
     ).rejects.toThrow("protected Git metadata")

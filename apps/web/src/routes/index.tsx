@@ -4,17 +4,17 @@ import { WikiWorkflow } from "@/components/wiki-workflow"
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>) => ({
-    createWorkspace: search.createWorkspace === true,
+    createWiki: search.createWiki === true,
   }),
   component: IndexRoute,
 })
 
 function IndexRoute() {
-  const { createWorkspace } = Route.useSearch()
+  const { createWiki } = Route.useSearch()
   return (
     <WikiWorkflow
-      createWorkspace={createWorkspace}
-      readyElement={<Navigate to="/workspace" />}
+      createWiki={createWiki}
+      readyElement={<Navigate to="/wiki" />}
     />
   )
 }

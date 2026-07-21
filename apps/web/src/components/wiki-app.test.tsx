@@ -7,31 +7,31 @@ import type {
   AmendApi,
   AmendResult,
   ReadWikiFileInput,
-  WikiFileContent,
+  WikiFileContent as WikiFileContentData,
   WikiIngestChangedEvent,
   WikiIngestJob,
   WikiFileTreeItem,
   WikiSearchResult,
-  WorkspaceSummary,
+  WikiSummary,
 } from "@workspace/contract"
 import { useState } from "react"
 import type { ButtonHTMLAttributes, ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { WorkspaceApp, WorkspaceFileContent } from "./workspace-app"
+import { WikiApp, WikiFileContent } from "./wiki-app"
 
 const routeHarness = vi.hoisted(() => ({
-  workspaceId: undefined as string | undefined,
+  wikiId: undefined as string | undefined,
   filePath: undefined as string | undefined,
   queryClient: undefined as QueryClient | undefined,
   renderOutlet: undefined as undefined | (() => ReactNode),
   navigate: undefined as
-    undefined | ((workspaceId: string, filePath?: string) => void),
-  creatingWorkspace: false,
+    undefined | ((wikiId: string, filePath?: string) => void),
+  creatingWiki: false,
 }))
 
 interface MockRouteParams {
-  workspaceId?: string
+  wikiId?: string
   _splat?: string
 }
 
@@ -48,8 +48,8 @@ vi.mock("@tanstack/react-router", () => ({
       href="#"
       onClick={(event) => {
         event.preventDefault()
-        if (params.workspaceId) {
-          routeHarness.navigate?.(params.workspaceId, params._splat)
+        if (params.wikiId) {
+          routeHarness.navigate?.(params.wikiId, params._splat)
         }
       }}
     >
@@ -64,15 +64,15 @@ vi.mock("@tanstack/react-router", () => ({
       to,
     }: {
       params?: MockRouteParams
-      search?: { createWorkspace?: boolean }
+      search?: { createWiki?: boolean }
       to?: string
     }) => {
-      if (to === "/" && search?.createWorkspace) {
-        routeHarness.creatingWorkspace = true
+      if (to === "/" && search?.createWiki) {
+        routeHarness.creatingWiki = true
         return
       }
-      if (params?.workspaceId) {
-        routeHarness.navigate?.(params.workspaceId, params._splat)
+      if (params?.wikiId) {
+        routeHarness.navigate?.(params.wikiId, params._splat)
       }
     },
   useRouter: () => ({
@@ -83,7 +83,7 @@ vi.mock("@tanstack/react-router", () => ({
     },
   }),
   useParams: () => ({
-    workspaceId: routeHarness.workspaceId,
+    wikiId: routeHarness.wikiId,
     _splat: routeHarness.filePath,
   }),
 }))
@@ -196,32 +196,32 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   delete window.amend
-  routeHarness.workspaceId = undefined
+  routeHarness.wikiId = undefined
   routeHarness.filePath = undefined
   routeHarness.queryClient = undefined
   routeHarness.renderOutlet = undefined
   routeHarness.navigate = undefined
-  routeHarness.creatingWorkspace = false
+  routeHarness.creatingWiki = false
 })
 
-describe("workspace app", () => {
-  it("opens index.md at the workspace root", async () => {
+describe("wiki app", () => {
+  it("opens index.md at the wiki root", async () => {
     const api = createDesktopApi()
     window.amend = api
 
-    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
     await screen.findByRole("heading", { name: "Reliability Wiki" })
     expect(api.wiki.readFile).toHaveBeenCalledWith({ path: "index.md" })
   })
 
-  it("renders the workspace file tree and previews selected files", async () => {
+  it("renders the wiki file tree and previews selected files", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
     window.amend = api
 
-    renderWorkspaceApp(api, {
-      initialWorkspaceId: workspaceSummary.id,
+    renderWikiApp(api, {
+      initialWikiId: wikiSummary.id,
       initialFilePath: "concepts/write-ahead-logging.md",
     })
 
@@ -241,21 +241,21 @@ describe("workspace app", () => {
     expect(api.wiki.readFile).toHaveBeenCalledWith({ path: "paper.pdf" })
   })
 
-  it("starts a sibling workspace from the workspace picker", async () => {
+  it("starts a sibling wiki from the wiki picker", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
     window.amend = api
 
-    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
     await user.click(
       await screen.findByRole("button", { name: "Create wiki" })
     )
 
-    expect(routeHarness.creatingWorkspace).toBe(true)
+    expect(routeHarness.creatingWiki).toBe(true)
   })
 
-  it("adds a document with editable workspace guidance", async () => {
+  it("adds a document with editable wiki guidance", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
     const source = new File(["source"], "incident-review.md", {
@@ -263,7 +263,7 @@ describe("workspace app", () => {
     })
     window.amend = api
 
-    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
     await user.click(
       await screen.findByRole("button", { name: "Add document" })
@@ -292,11 +292,11 @@ describe("workspace app", () => {
     expect(screen.queryByRole("heading", { name: "Add document" })).toBeNull()
   })
 
-  it("disables adding a document while the active workspace is ingesting", async () => {
-    const api = createDesktopApi({ activeWorkspaceRunning: true })
+  it("disables adding a document while the active wiki is ingesting", async () => {
+    const api = createDesktopApi({ activeWikiRunning: true })
     window.amend = api
 
-    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
     expect(
       await screen.findByRole("button", { name: "Add document" })
@@ -308,14 +308,14 @@ describe("workspace app", () => {
     const api = createDesktopApi()
     window.amend = api
 
-    renderWorkspaceApp(api, {
-      initialWorkspaceId: workspaceSummary.id,
+    renderWikiApp(api, {
+      initialWikiId: wikiSummary.id,
       initialFilePath: "concepts/write-ahead-logging.md",
     })
 
     const wikiLink = await screen.findByRole("link", { name: "checkpointing" })
     expect(wikiLink.getAttribute("href")).toBe(
-      "/workspace/workspace-id/concepts/checkpointing.md"
+      "/wiki/wiki-id/concepts/checkpointing.md"
     )
     expect(screen.getByRole("link", { name: "Reference" })).toHaveProperty(
       "target",
@@ -334,12 +334,12 @@ describe("workspace app", () => {
     })
   })
 
-  it("expands and collapses workspace folders", async () => {
+  it("expands and collapses wiki folders", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
     window.amend = api
 
-    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
     const folder = await screen.findByRole("button", { name: "concepts" })
     expect(
@@ -373,7 +373,7 @@ describe("workspace app", () => {
     })
     window.amend = api
 
-    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
     await user.click(
       await screen.findByRole("button", { name: /search wiki/i })
@@ -401,7 +401,7 @@ describe("workspace app", () => {
     const api = createDesktopApi()
     window.amend = api
 
-    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
     await user.keyboard("{Control>}k{/Control}")
     await screen.findByPlaceholderText("Search this wiki...")
@@ -417,7 +417,7 @@ describe("workspace app", () => {
     const api = createDesktopApi()
     window.amend = api
 
-    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
     await screen.findByRole("heading", { name: "Reliability Wiki" })
     await user.keyboard("{Control>}f{/Control}")
@@ -435,25 +435,25 @@ describe("workspace app", () => {
     expect(screen.queryByPlaceholderText("Find in this file")).toBeNull()
   })
 
-  it("keeps workspace running badges fresh from ingest events", async () => {
+  it("keeps wiki running badges fresh from ingest events", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
     window.amend = api
 
-    renderWorkspaceApp(api, {
-      initialWorkspaceId: workspaceSummary.id,
+    renderWikiApp(api, {
+      initialWikiId: wikiSummary.id,
       initialFilePath: "concepts/write-ahead-logging.md",
     })
 
     await user.click(
       await screen.findByRole("button", { name: "Reliability Wiki" })
     )
-    const archiveWorkspace = (await screen.findAllByRole("menuitemradio"))[1]
-    expect(archiveWorkspace.textContent).toContain("Running")
+    const archiveWiki = (await screen.findAllByRole("menuitemradio"))[1]
+    expect(archiveWiki.textContent).toContain("Running")
     await waitFor(() => expect(api.wiki.onIngestChanged).toHaveBeenCalledOnce())
     await act(() => {
       api.emitIngestChanged({
-        workspaceId: archiveWorkspaceSummary.id,
+        wikiId: archiveWikiSummary.id,
         job: completedIngestJob,
       })
     })
@@ -465,17 +465,17 @@ describe("workspace app", () => {
     )
   })
 
-  it("refreshes active workspace files after an ingest completes", async () => {
+  it("refreshes active wiki files after an ingest completes", async () => {
     const api = createDesktopApi()
     window.amend = api
 
-    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
     await screen.findByRole("button", { name: "Add document" })
     await waitFor(() => expect(api.wiki.listFiles).toHaveBeenCalledOnce())
     await act(() => {
       api.emitIngestChanged({
-        workspaceId: workspaceSummary.id,
+        wikiId: wikiSummary.id,
         job: completedIngestJob,
       })
     })
@@ -483,64 +483,64 @@ describe("workspace app", () => {
     await waitFor(() => expect(api.wiki.listFiles).toHaveBeenCalledTimes(2))
   })
 
-  it("does not read a file when the route workspace cannot be activated", async () => {
+  it("does not read a file when the route wiki cannot be activated", async () => {
     const api = createDesktopApi()
-    vi.mocked(api.workspaces.activate).mockResolvedValue({
+    vi.mocked(api.wikis.activate).mockResolvedValue({
       ok: false,
       error: {
-        code: "workspace-open-failed",
-        message: "Workspace unavailable",
+        code: "wiki-open-failed",
+        message: "Wiki unavailable",
       },
     })
 
-    renderWorkspaceApp(api, {
-      initialWorkspaceId: "unavailable-workspace",
+    renderWikiApp(api, {
+      initialWikiId: "unavailable-wiki",
       initialFilePath: "concepts/write-ahead-logging.md",
     })
 
     await waitFor(() =>
-      expect(api.workspaces.activate).toHaveBeenCalledWith({
-        workspaceId: "unavailable-workspace",
+      expect(api.wikis.activate).toHaveBeenCalledWith({
+        wikiId: "unavailable-wiki",
       })
     )
     expect(api.wiki.readFile).not.toHaveBeenCalled()
   })
 })
 
-function renderWorkspaceApp(
+function renderWikiApp(
   api: MockAmendApi,
   {
-    initialWorkspaceId,
+    initialWikiId,
     initialFilePath,
   }: {
-    initialWorkspaceId?: string
+    initialWikiId?: string
     initialFilePath?: string
   } = {}
 ) {
   window.amend = api
 
-  function WorkspaceRouteHarness() {
-    const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId)
+  function WikiRouteHarness() {
+    const [wikiId, setWikiId] = useState(initialWikiId)
     const [filePath, setFilePath] = useState(initialFilePath)
-    routeHarness.workspaceId = workspaceId
+    routeHarness.wikiId = wikiId
     routeHarness.filePath = filePath
-    routeHarness.navigate = (nextWorkspaceId, nextFilePath) => {
-      setWorkspaceId(nextWorkspaceId)
+    routeHarness.navigate = (nextWikiId, nextFilePath) => {
+      setWikiId(nextWikiId)
       setFilePath(nextFilePath)
     }
     routeHarness.renderOutlet = () =>
       filePath ? (
-        <WorkspaceFileContent
-          workspaceId={workspaceId ?? workspaceSummary.id}
+        <WikiFileContent
+          wikiId={wikiId ?? wikiSummary.id}
           filePath={filePath}
         />
       ) : (
-        <WorkspaceFileContent
-          workspaceId={workspaceId ?? workspaceSummary.id}
+        <WikiFileContent
+          wikiId={wikiId ?? wikiSummary.id}
           filePath="index.md"
         />
       )
-    return <WorkspaceApp workspaceId={workspaceId ?? workspaceSummary.id} />
+    return <WikiApp wikiId={wikiId ?? wikiSummary.id} />
   }
 
   const queryClient = new QueryClient({
@@ -548,7 +548,7 @@ function renderWorkspaceApp(
   })
   routeHarness.queryClient = queryClient
 
-  return render(<WorkspaceRouteHarness />)
+  return render(<WikiRouteHarness />)
 }
 
 type MockAmendApi = AmendApi & {
@@ -556,10 +556,10 @@ type MockAmendApi = AmendApi & {
 }
 
 function createDesktopApi({
-  activeWorkspaceRunning = false,
+  activeWikiRunning = false,
   searchResults = [],
 }: {
-  activeWorkspaceRunning?: boolean
+  activeWikiRunning?: boolean
   searchResults?: readonly WikiSearchResult[]
 } = {}): MockAmendApi {
   const ingestListeners = new Set<(event: WikiIngestChangedEvent) => void>()
@@ -569,30 +569,30 @@ function createDesktopApi({
     appearance: {
       setTheme: vi.fn(async () => success(null)),
     },
-    workspaces: {
+    wikis: {
       chooseHome: vi.fn(async () => success(null)),
       home: vi.fn(async () => success({ displayPath: "/research" })),
-      create: vi.fn(async () => success(workspaceSummary)),
-      current: vi.fn(async () => success(workspaceSummary)),
+      create: vi.fn(async () => success(wikiSummary)),
+      current: vi.fn(async () => success(wikiSummary)),
       list: vi.fn(async () =>
         success([
           {
-            id: workspaceSummary.id,
-            name: workspaceSummary.name,
-            displayPath: workspaceSummary.displayPath,
+            id: wikiSummary.id,
+            name: wikiSummary.name,
+            displayPath: wikiSummary.displayPath,
             active: true,
-            running: activeWorkspaceRunning,
+            running: activeWikiRunning,
           },
           {
-            id: archiveWorkspaceSummary.id,
-            name: archiveWorkspaceSummary.name,
-            displayPath: archiveWorkspaceSummary.displayPath,
+            id: archiveWikiSummary.id,
+            name: archiveWikiSummary.name,
+            displayPath: archiveWikiSummary.displayPath,
             active: false,
             running: true,
           },
         ])
       ),
-      activate: vi.fn(async () => success(workspaceSummary)),
+      activate: vi.fn(async () => success(wikiSummary)),
     },
     providers: {
       status: vi.fn(async () => success({ configured: true })),
@@ -651,7 +651,7 @@ function createDesktopApi({
         return success(files)
       }),
       readFile: vi.fn(async ({ path }: ReadWikiFileInput) => {
-        const file: WikiFileContent =
+        const file: WikiFileContentData =
           path === "paper.pdf"
             ? {
                 path,
@@ -681,7 +681,7 @@ function createDesktopApi({
                     mediaType: "markdown",
                     size: 190,
                     content:
-                      "---\r\ntitle: Write-Ahead Logging\r\ncreated: 2026-07-20\r\nupdated: 2026-07-20\r\ntype: concept\r\ntags:\r\n  - storage\r\nsources:\r\n  - raw/papers/paper.md\r\n---\r\n\r\n# Write-ahead logging\r\n\r\nSee [[checkpointing]].\r\n\r\n[Reference](https://example.com/workspace/other/page).",
+                      "---\r\ntitle: Write-Ahead Logging\r\ncreated: 2026-07-20\r\nupdated: 2026-07-20\r\ntype: concept\r\ntags:\r\n  - storage\r\nsources:\r\n  - raw/papers/paper.md\r\n---\r\n\r\n# Write-ahead logging\r\n\r\nSee [[checkpointing]].\r\n\r\n[Reference](https://example.com/wiki/other/page).",
                   }
         return success(file)
       }),
@@ -699,8 +699,8 @@ function createDesktopApi({
   return api
 }
 
-const workspaceSummary: WorkspaceSummary = {
-  id: "workspace-id",
+const wikiSummary: WikiSummary = {
+  id: "wiki-id",
   name: "Reliability Wiki",
   domain: "Database reliability engineering",
   displayPath: "/research/Reliability Wiki",
@@ -708,8 +708,8 @@ const workspaceSummary: WorkspaceSummary = {
   setupStatus: "ready",
 }
 
-const archiveWorkspaceSummary: WorkspaceSummary = {
-  id: "archive-workspace-id",
+const archiveWikiSummary: WikiSummary = {
+  id: "archive-wiki-id",
   name: "Archive Wiki",
   domain: "Archive research",
   displayPath: "/research/Archive Wiki",

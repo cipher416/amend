@@ -18,8 +18,8 @@ import {
   wikiPageDirectories,
 } from "../internal/format.ts"
 import { git } from "../internal/git.ts"
-import { validateWorkspaceId } from "../internal/workspace-manifest.ts"
-import { resolveWorkspacePath } from "../workspace.ts"
+import { validateWikiId } from "../internal/wiki-manifest.ts"
+import { resolveWikiPath } from "../wiki.ts"
 
 export interface WikiAgentRunInput {
   workspacePath: string
@@ -107,7 +107,7 @@ export interface WikiEngine {
 
 export interface WikiEngineOptions {
   agent: WikiAgent
-  createWorkspaceId?: () => string
+  createWikiId?: () => string
   createRunId?: () => string
   now?: () => Date
 }
@@ -125,7 +125,7 @@ const pageDirectories = wikiPageDirectories
 const managedRootFiles = new Set(["SCHEMA.md", "index.md", "log.md"])
 
 export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
-  const createWorkspaceId = options.createWorkspaceId ?? randomUUID
+  const createWikiId = options.createWikiId ?? randomUUID
   const createRunId = options.createRunId ?? randomUUID
   const now = options.now ?? (() => new Date())
 
@@ -134,7 +134,7 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
       const workspacePath = resolve(input.workspacePath)
       const domain = input.domain.trim()
       if (!domain) throw new Error("Wiki domain is required")
-      const workspaceId = validateWorkspaceId(createWorkspaceId())
+      const wikiId = validateWikiId(createWikiId())
 
       await mkdir(workspacePath)
       try {
@@ -150,12 +150,8 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
         )
         await Promise.all([
           writeFile(
-            join(workspacePath, ".amend/workspace.json"),
-            `${JSON.stringify(
-              { version: 2, id: workspaceId, domain },
-              null,
-              2
-            )}\n`
+            join(workspacePath, ".amend/wiki.json"),
+            `${JSON.stringify({ version: 2, id: wikiId, domain }, null, 2)}\n`
           ),
           writeFile(join(workspacePath, "SCHEMA.md"), createSchema(domain)),
           writeFile(join(workspacePath, "index.md"), createIndex()),
@@ -182,7 +178,7 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
 
         return {
           workspacePath: await realpath(workspacePath),
-          id: workspaceId,
+          id: wikiId,
           commitHash: await git(workspacePath, "rev-parse", "HEAD"),
         }
       } catch (error) {
@@ -195,8 +191,8 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
 
     async ingest(input) {
       input.signal?.throwIfAborted()
-      const workspacePath = await resolveWorkspacePath({
-        workspacePath: input.workspacePath,
+      const workspacePath = await resolveWikiPath({
+        wikiPath: input.workspacePath,
       })
       input.signal?.throwIfAborted()
       const lockPath = join(workspacePath, ".git/amend-run.lock")
@@ -205,7 +201,7 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
       try {
         input.signal?.throwIfAborted()
         const status = await git(workspacePath, "status", "--porcelain")
-        if (status) throw new Error("Wiki workspace must be clean")
+        if (status) throw new Error("Wiki must be clean")
 
         const runId = validateRunId(createRunId())
         const createdAt = now().toISOString()
@@ -335,7 +331,7 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
           input.signal?.throwIfAborted()
           input.onCommitStart?.()
           if (await git(workspacePath, "status", "--porcelain")) {
-            throw new Error("Wiki workspace changed during ingest")
+            throw new Error("Wiki changed during ingest")
           }
           await git(
             workspacePath,
@@ -368,7 +364,7 @@ export function createWikiEngine(options: WikiEngineOptions): WikiEngine {
                 "Wiki promotion failed and the main branch could not be rolled back"
               )
             }
-            throw new Error("Wiki workspace changed during promotion", {
+            throw new Error("Wiki changed during promotion", {
               cause: error,
             })
           }
@@ -854,10 +850,10 @@ async function acquireLock(lockPath: string) {
         await rm(lockPath, { force: true })
         continue
       }
-      throw new Error("Wiki workspace is busy")
+      throw new Error("Wiki is busy")
     }
   }
-  throw new Error("Wiki workspace is busy")
+  throw new Error("Wiki is busy")
 }
 
 async function releaseLock(

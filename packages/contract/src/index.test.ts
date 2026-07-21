@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest"
 
 import { amendChannels } from "./channels.ts"
 import {
-  isActivateWorkspaceInput,
+  isActivateWikiInput,
   isCancelIngestInput,
-  isCreateWorkspaceInput,
+  isCreateWikiInput,
   isIngestDocumentInput,
   isPiCancelLoginInput,
   isPiListModelsInput,
@@ -29,20 +29,20 @@ import {
   isWikiIngestChangedEvent,
   isWikiIngestJob,
   isWikiProgressEvent,
-  isWorkspaceListItems,
-  isWorkspaceSummary,
-  isWorkspaceSummaryOrNull,
+  isWikiListItems,
+  isWikiSummary,
+  isWikiSummaryOrNull,
 } from "./guards.ts"
 
 describe("desktop contract validation", () => {
-  it("uses plural workspace and provider channel namespaces", () => {
+  it("uses plural wiki and provider channel namespaces", () => {
     expect(amendChannels).toMatchObject({
-      chooseWorkspaceHome: "amend:workspaces:choose-home",
-      getWorkspaceHome: "amend:workspaces:home",
-      createWorkspace: "amend:workspaces:create",
-      getCurrentWorkspace: "amend:workspaces:current",
-      listWorkspaces: "amend:workspaces:list",
-      activateWorkspace: "amend:workspaces:activate",
+      chooseWikiHome: "amend:wikis:choose-home",
+      getWikiHome: "amend:wikis:home",
+      createWiki: "amend:wikis:create",
+      getCurrentWiki: "amend:wikis:current",
+      listWikis: "amend:wikis:list",
+      activateWiki: "amend:wikis:activate",
       setAppearanceTheme: "amend:appearance:set-theme",
       getProviderStatus: "amend:providers:status",
       listProviders: "amend:providers:list",
@@ -60,7 +60,7 @@ describe("desktop contract validation", () => {
 
   it("accepts valid workflow requests", () => {
     expect(
-      isCreateWorkspaceInput({
+      isCreateWikiInput({
         name: "AI Research",
         domain: "AI systems research",
       })
@@ -73,16 +73,14 @@ describe("desktop contract validation", () => {
     ).toBe(true)
     expect(isWikiSearchInput({ query: "attention", scope: "pages" })).toBe(true)
     expect(isCancelIngestInput({ jobId: "ingest_12345678" })).toBe(true)
-    expect(
-      isActivateWorkspaceInput({ workspaceId: "workspace_12345678" })
-    ).toBe(true)
+    expect(isActivateWikiInput({ wikiId: "wiki_12345678" })).toBe(true)
     expect(isReadWikiFileInput({ path: "concepts/cache.md" })).toBe(true)
     expect(isThemeSource("system")).toBe(true)
   })
 
   it("rejects paths, unknown fields, blank text, and unsafe filters", () => {
     expect(
-      isCreateWorkspaceInput({
+      isCreateWikiInput({
         name: "../escape",
         domain: "research",
       })
@@ -96,12 +94,10 @@ describe("desktop contract validation", () => {
     expect(isWikiSearchInput({ query: "wiki", extra: true })).toBe(false)
     expect(isWikiSearchInput({ query: "wiki", tags: ["Not Safe"] })).toBe(false)
     expect(isCancelIngestInput({ jobId: "../other-job" })).toBe(false)
+    expect(isActivateWikiInput({ wikiId: "../other-wiki" })).toBe(false)
     expect(
-      isActivateWorkspaceInput({ workspaceId: "../other-workspace" })
-    ).toBe(false)
-    expect(
-      isActivateWorkspaceInput({
-        workspaceId: "workspace_12345678",
+      isActivateWikiInput({
+        wikiId: "wiki_12345678",
         displayPath: "/must/not/cross/ipc",
       })
     ).toBe(false)
@@ -121,35 +117,35 @@ describe("desktop contract validation", () => {
       commitHash: "abc123",
       setupStatus: "ready",
     }
-    expect(
-      isAmendResult({ ok: true, value: workspace }, isWorkspaceSummary)
-    ).toBe(true)
-    expect(
-      isWorkspaceSummary({ ...workspace, setupStatus: "initialized" })
-    ).toBe(true)
-    expect(
-      isAmendResult({ ok: true, value: null }, isWorkspaceSummaryOrNull)
-    ).toBe(true)
+    expect(isAmendResult({ ok: true, value: workspace }, isWikiSummary)).toBe(
+      true
+    )
+    expect(isWikiSummary({ ...workspace, setupStatus: "initialized" })).toBe(
+      true
+    )
+    expect(isAmendResult({ ok: true, value: null }, isWikiSummaryOrNull)).toBe(
+      true
+    )
     expect(
       isAmendResult(
         {
           ok: false,
           error: {
-            code: "workspace-open-failed",
-            message: "The workspace could not be opened.",
+            code: "wiki-open-failed",
+            message: "The wiki could not be opened.",
           },
         },
-        isWorkspaceSummaryOrNull
+        isWikiSummaryOrNull
       )
     ).toBe(true)
     expect(
       isAmendResult(
         { ok: true, value: { ...workspace, secret: "must not cross preload" } },
-        isWorkspaceSummary
+        isWikiSummary
       )
     ).toBe(false)
     expect(
-      isWorkspaceSummary({
+      isWikiSummary({
         id: "wiki-id",
         name: "Research",
         domain: "Systems research",
@@ -157,28 +153,23 @@ describe("desktop contract validation", () => {
         commitHash: "abc123",
       })
     ).toBe(false)
-    expect(isWorkspaceSummary({ ...workspace, setupStatus: "complete" })).toBe(
-      false
-    )
+    expect(isWikiSummary({ ...workspace, setupStatus: "complete" })).toBe(false)
     const workspaceListItem = {
-      id: "workspace_12345678",
+      id: "wiki_12345678",
       name: "Research",
       displayPath: "/research/wiki",
       active: true,
       running: false,
     }
-    expect(isWorkspaceListItems([workspaceListItem])).toBe(true)
+    expect(isWikiListItems([workspaceListItem])).toBe(true)
     expect(
-      isAmendResult(
-        { ok: true, value: [workspaceListItem] },
-        isWorkspaceListItems
-      )
+      isAmendResult({ ok: true, value: [workspaceListItem] }, isWikiListItems)
     ).toBe(true)
+    expect(isWikiListItems([{ ...workspaceListItem, running: "no" }])).toBe(
+      false
+    )
     expect(
-      isWorkspaceListItems([{ ...workspaceListItem, running: "no" }])
-    ).toBe(false)
-    expect(
-      isWorkspaceListItems([{ ...workspaceListItem, domain: "must not cross" }])
+      isWikiListItems([{ ...workspaceListItem, domain: "must not cross" }])
     ).toBe(false)
     expect(
       isSourceDocumentSelectionOrNull({
@@ -261,7 +252,7 @@ describe("desktop contract validation", () => {
     ).toBe(false)
   })
 
-  it("validates workspace-scoped ingest events", () => {
+  it("validates wiki-scoped ingest events", () => {
     const runningJob = {
       id: "ingest_12345678",
       title: "Attention Is All You Need",
@@ -275,24 +266,24 @@ describe("desktop contract validation", () => {
     }
     expect(
       isWikiIngestChangedEvent({
-        workspaceId: "workspace_12345678",
+        wikiId: "wiki_12345678",
         job: runningJob,
       })
     ).toBe(true)
     expect(
       isWikiIngestChangedEvent({
-        workspaceId: "workspace_12345678",
+        wikiId: "wiki_12345678",
         job: { ...runningJob, status: "unknown" },
       })
     ).toBe(false)
     expect(
       isWikiIngestChangedEvent({
-        workspaceId: "workspace_12345678",
+        wikiId: "wiki_12345678",
         job: runningJob,
         extra: true,
       })
     ).toBe(false)
-    expect(isWikiIngestChangedEvent({ workspaceId: 42, job: runningJob })).toBe(
+    expect(isWikiIngestChangedEvent({ wikiId: 42, job: runningJob })).toBe(
       false
     )
   })

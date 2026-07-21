@@ -17,18 +17,18 @@ import {
   isWikiIngestJobOrNull,
   isWikiSearchResults,
   isWikiTagFacets,
-  isWorkspaceHomeOrNull,
-  isWorkspaceListItems,
-  isWorkspaceSummary,
-  isWorkspaceSummaryOrNull,
+  isWikiHomeOrNull,
+  isWikiListItems,
+  isWikiSummary,
+  isWikiSummaryOrNull,
 } from "@workspace/contract/guards"
 import type { Guard } from "@workspace/contract/guards"
 import type {
-  ActivateWorkspaceInput,
+  ActivateWikiInput,
   AmendApi,
   AmendResult,
   CancelIngestInput,
-  CreateWorkspaceInput,
+  CreateWikiInput,
   IngestDocumentInput,
   PiCancelLoginInput,
   PiListModelsInput,
@@ -41,22 +41,21 @@ import type {
   ThemeSource,
   WikiIngestChangedEvent,
   WikiSearchInput,
-  WorkspaceHome,
+  WikiHome,
 } from "@workspace/contract"
 import { contextBridge, ipcRenderer, webUtils } from "electron"
 
-const workspaces = Object.freeze({
+const wikis = Object.freeze({
   chooseHome: () =>
-    invoke<WorkspaceHome | null>(amendChannels.chooseWorkspaceHome, isWorkspaceHomeOrNull),
+    invoke<WikiHome | null>(amendChannels.chooseWikiHome, isWikiHomeOrNull),
   home: () =>
-    invoke<WorkspaceHome | null>(amendChannels.getWorkspaceHome, isWorkspaceHomeOrNull),
-  create: (input: CreateWorkspaceInput) =>
-    invoke(amendChannels.createWorkspace, isWorkspaceSummary, input),
-  current: () =>
-    invoke(amendChannels.getCurrentWorkspace, isWorkspaceSummaryOrNull),
-  list: () => invoke(amendChannels.listWorkspaces, isWorkspaceListItems),
-  activate: (input: ActivateWorkspaceInput) =>
-    invoke(amendChannels.activateWorkspace, isWorkspaceSummary, input),
+    invoke<WikiHome | null>(amendChannels.getWikiHome, isWikiHomeOrNull),
+  create: (input: CreateWikiInput) =>
+    invoke(amendChannels.createWiki, isWikiSummary, input),
+  current: () => invoke(amendChannels.getCurrentWiki, isWikiSummaryOrNull),
+  list: () => invoke(amendChannels.listWikis, isWikiListItems),
+  activate: (input: ActivateWikiInput) =>
+    invoke(amendChannels.activateWiki, isWikiSummary, input),
 })
 
 const appearance = Object.freeze({
@@ -150,7 +149,7 @@ const amendApi = Object.freeze({
   runtime: "electron" as const,
   platform: process.platform,
   appearance,
-  workspaces,
+  wikis,
   providers,
   wiki,
 }) satisfies AmendApi

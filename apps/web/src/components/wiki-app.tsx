@@ -4,9 +4,8 @@ import type {
   AmendApi,
   WikiFileContent,
   WikiFileTreeItem,
-  WorkspaceSummary,
+  WikiSummary,
 } from "@workspace/contract"
-import type { WorkspaceBusy } from "./workspace-session"
 import {
   Sidebar,
   SidebarInset,
@@ -20,64 +19,57 @@ import { createContext, useContext, useRef } from "react"
 import type { ReactNode } from "react"
 
 import { errorMessage, useAmendApi } from "@/lib/amend-client"
-import { readFile, workspaceFileKey } from "@/lib/workspace-queries"
+import { readFile, wikiFileKey } from "@/lib/wiki-queries"
 
-import { parseMarkdownDocument, WikiFileViewer } from "./wiki-file-viewer"
-import { WorkflowError } from "./wiki-workflow-ui"
-import { WorkspaceSession, useWorkspaceSession } from "./workspace-session"
-import { WorkspaceFileSearch } from "./workspace-file-search"
-import { WorkspaceSidebar } from "./workspace-sidebar"
 import { ThemeProvider } from "./theme"
+import { WikiFileSearch } from "./wiki-file-search"
+import { parseMarkdownDocument, WikiFileViewer } from "./wiki-file-viewer"
+import { WikiSession, useWikiSession } from "./wiki-session"
+import { WikiSidebar } from "./wiki-sidebar"
+import { WorkflowError } from "./wiki-workflow-ui"
 
-interface WorkspaceViewContextValue {
+interface WikiViewContextValue {
   desktop: AmendApi
-  workspace: WorkspaceSummary
+  wiki: WikiSummary
   files: readonly WikiFileTreeItem[]
-  busy: WorkspaceBusy
+  busy: import("./wiki-session").WikiBusy
   error?: string
 }
 
-const WorkspaceViewContext = createContext<WorkspaceViewContextValue | null>(
-  null
-)
+const WikiViewContext = createContext<WikiViewContextValue | null>(null)
 
-export function WorkspaceApp({ workspaceId }: { workspaceId: string }) {
+export function WikiApp({ wikiId }: { wikiId: string }) {
   const desktop = useAmendApi()
-  if (desktop === undefined) return <WorkspaceOpening />
-  if (desktop === null) return <WorkspaceDesktopRequired />
+  if (desktop === undefined) return <WikiOpening />
+  if (desktop === null) return <WikiDesktopRequired />
 
   return (
-    <WorkspaceSession desktop={desktop} workspaceId={workspaceId}>
-      <WorkspaceAppContent />
-    </WorkspaceSession>
+    <WikiSession desktop={desktop} wikiId={wikiId}>
+      <WikiAppContent />
+    </WikiSession>
   )
 }
 
-function WorkspaceAppContent() {
-  const { desktop, opening, workspace, workspaces, files, busy, error } =
-    useWorkspaceSession()
+function WikiAppContent() {
+  const { desktop, opening, wiki, wikis, files, busy, error } = useWikiSession()
   const { _splat: selectedPath } = useParams({ strict: false })
 
-  if (opening) return <WorkspaceOpening />
-  if (!workspace) {
-    if (error) return <WorkspaceLoadError message={error} />
-    return <WorkspaceNotReady />
+  if (opening) return <WikiOpening />
+  if (!wiki) {
+    if (error) return <WikiLoadError message={error} />
+    return <WikiNotReady />
   }
 
-  const running = workspaces.some(
-    (item) => item.id === workspace.id && item.running
-  )
+  const running = wikis.some((item) => item.id === wiki.id && item.running)
 
   return (
-    <WorkspaceViewContext.Provider
-      value={{ desktop, workspace, files, busy, error }}
-    >
-      <WorkspaceShell
+    <WikiViewContext.Provider value={{ desktop, wiki, files, busy, error }}>
+      <WikiShell
         sidebar={
-          <WorkspaceSidebar
+          <WikiSidebar
             desktop={desktop}
-            workspace={workspace}
-            workspaces={workspaces}
+            wiki={wiki}
+            wikis={wikis}
             files={files}
             selectedPath={selectedPath}
             switching={busy === "switch"}
@@ -87,40 +79,33 @@ function WorkspaceAppContent() {
         }
       >
         <Outlet />
-      </WorkspaceShell>
-    </WorkspaceViewContext.Provider>
+      </WikiShell>
+    </WikiViewContext.Provider>
   )
 }
 
-export function WorkspaceEmptyContent() {
-  const { workspace, files, busy, error } = useWorkspaceView()
-  return (
-    <WorkspaceMain
-      workspace={workspace}
-      files={files}
-      busy={busy}
-      error={error}
-    />
-  )
+export function WikiEmptyContent() {
+  const { wiki, files, busy, error } = useWikiView()
+  return <WikiMain wiki={wiki} files={files} busy={busy} error={error} />
 }
 
-export function WorkspaceFileContent({
-  workspaceId,
+export function WikiFileContent({
+  wikiId,
   filePath,
 }: {
-  workspaceId: string
+  wikiId: string
   filePath: string
 }) {
-  const { desktop, workspace, files, busy, error } = useWorkspaceView()
+  const { desktop, wiki, files, busy, error } = useWikiView()
   const queryClient = useRouter().options.context.queryClient
-  const routeMatchesWorkspace = workspace.id === workspaceId
+  const routeMatchesWiki = wiki.id === wikiId
   const selectedFile = useQuery(
     {
-      queryKey: routeMatchesWorkspace
-        ? workspaceFileKey(workspaceId, filePath)
-        : ["workspace", "file", "disabled"],
+      queryKey: routeMatchesWiki
+        ? wikiFileKey(wikiId, filePath)
+        : ["wiki", "file", "disabled"],
       queryFn: () => readFile(desktop, filePath),
-      enabled: routeMatchesWorkspace,
+      enabled: routeMatchesWiki,
     },
     queryClient
   )
@@ -128,8 +113,8 @@ export function WorkspaceFileContent({
   const fileError = error ?? queryErrorMessage(selectedFile.error)
 
   return (
-    <WorkspaceMain
-      workspace={workspace}
+    <WikiMain
+      wiki={wiki}
       files={files}
       selectedFile={selectedFile.data}
       busy={fileBusy}
@@ -138,14 +123,13 @@ export function WorkspaceFileContent({
   )
 }
 
-function useWorkspaceView(): WorkspaceViewContextValue {
-  const value = useContext(WorkspaceViewContext)
-  if (!value)
-    throw new Error("Workspace route content must render inside WorkspaceApp")
+function useWikiView(): WikiViewContextValue {
+  const value = useContext(WikiViewContext)
+  if (!value) throw new Error("Wiki route content must render inside WikiApp")
   return value
 }
 
-function WorkspaceNotReady() {
+function WikiNotReady() {
   return (
     <main className="grid min-h-svh place-items-center bg-background p-6 text-foreground">
       <section className="max-w-sm">
@@ -153,14 +137,14 @@ function WorkspaceNotReady() {
           Create a wiki first.
         </h1>
         <p className="mt-2 text-sm/relaxed text-muted-foreground">
-          The workspace browser opens after your first source is committed.
+          The wiki opens after your first source is committed.
         </p>
       </section>
     </main>
   )
 }
 
-function WorkspaceLoadError({ message }: { message: string }) {
+function WikiLoadError({ message }: { message: string }) {
   return (
     <main className="grid min-h-svh place-items-center bg-background p-6 text-foreground">
       <p className="max-w-sm text-sm text-muted-foreground">{message}</p>
@@ -168,18 +152,18 @@ function WorkspaceLoadError({ message }: { message: string }) {
   )
 }
 
-function WorkspaceOpening() {
+function WikiOpening() {
   return (
     <main className="grid min-h-svh place-items-center bg-background text-foreground">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Spinner />
-        <span>Opening workspace</span>
+        <span>Opening wiki</span>
       </div>
     </main>
   )
 }
 
-function WorkspaceDesktopRequired() {
+function WikiDesktopRequired() {
   return (
     <main className="grid min-h-svh place-items-center bg-background p-6 text-foreground">
       <section className="w-full max-w-sm">
@@ -188,7 +172,7 @@ function WorkspaceDesktopRequired() {
         </h1>
         <p className="mt-2 text-sm/relaxed text-muted-foreground">
           Open this interface in the Amend desktop application to browse local
-          workspace files.
+          wiki files.
         </p>
       </section>
     </main>
@@ -199,7 +183,7 @@ function queryErrorMessage(error: Error | null): string | undefined {
   return error ? errorMessage(error) : undefined
 }
 
-function WorkspaceShell({
+function WikiShell({
   sidebar,
   children,
 }: {
@@ -221,17 +205,17 @@ function WorkspaceShell({
   )
 }
 
-function WorkspaceMain({
-  workspace,
+function WikiMain({
+  wiki,
   files,
   selectedFile,
   busy,
   error,
 }: {
-  workspace: WorkspaceSummary
+  wiki: WikiSummary
   files: readonly WikiFileTreeItem[]
   selectedFile?: WikiFileContent
-  busy: WorkspaceBusy
+  busy: import("./wiki-session").WikiBusy
   error?: string
 }) {
   const contentRef = useRef<HTMLDivElement>(null)
@@ -240,7 +224,7 @@ function WorkspaceMain({
       ? parseMarkdownDocument(selectedFile.content ?? "")
       : undefined
   const headerTitle =
-    document?.metadata.title ?? selectedFile?.name ?? workspace.name
+    document?.metadata.title ?? selectedFile?.name ?? wiki.name
 
   return (
     <>
@@ -249,7 +233,7 @@ function WorkspaceMain({
         <p className="min-w-0 flex-1 truncate font-heading text-sm font-medium">
           {headerTitle}
         </p>
-        <WorkspaceFileSearch contentRef={contentRef} file={selectedFile} />
+        <WikiFileSearch contentRef={contentRef} file={selectedFile} />
       </header>
       <main className="h-[calc(100svh-4rem)] w-full scroll-fade overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
@@ -264,7 +248,7 @@ function WorkspaceMain({
               <WikiFileViewer
                 file={selectedFile}
                 document={document}
-                workspaceId={workspace.id}
+                wikiId={wiki.id}
                 files={files}
               />
             </div>

@@ -31,7 +31,7 @@ describe("wiki engine", () => {
     const dates = ["2026-07-19T12:00:00.000Z", "2026-07-20T12:00:00.000Z"]
     const engine = createWikiEngine({
       agent: createFakeAgent(),
-      createWorkspaceId: () => "123e4567-e89b-42d3-a456-426614174000",
+      createWikiId: () => "123e4567-e89b-42d3-a456-426614174000",
       createRunId: () => {
         const id = runIds.shift()
         if (!id) throw new Error("test exhausted run IDs")
@@ -56,7 +56,7 @@ describe("wiki engine", () => {
     expect(initialized.id).toBe("123e4567-e89b-42d3-a456-426614174000")
     expect(
       JSON.parse(
-        await readFile(join(workspacePath, ".amend/workspace.json"), "utf8")
+        await readFile(join(workspacePath, ".amend/wiki.json"), "utf8")
       )
     ).toEqual({
       version: 2,
@@ -428,7 +428,7 @@ The log supports recovery.
           },
         ],
       })
-    ).rejects.toThrow("Wiki workspace changed during ingest")
+    ).rejects.toThrow("Wiki changed during ingest")
     expect(await readFile(join(workspacePath, "index.md"), "utf8")).toBe(
       userEdit
     )

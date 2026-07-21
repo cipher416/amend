@@ -1,7 +1,7 @@
 import type {
   AmendApi,
   SourceDocumentSelection,
-  WorkspaceSummary,
+  WikiSummary,
 } from "@workspace/contract"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 import { Button } from "@workspace/ui/components/button"
@@ -36,20 +36,20 @@ const documentAccept = {
   "text/plain": [".txt", ".text"],
 }
 
-export function WorkspaceAddDocument({
+export function WikiAddDocument({
   desktop,
-  workspace,
+  wiki,
   running,
 }: {
   desktop: AmendApi
-  workspace: WorkspaceSummary
+  wiki: WikiSummary
   running: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [document, setDocument] = useState<SourceDocumentSelection>()
   const [sourceFiles, setSourceFiles] = useState<File[]>()
   const [objective, setObjective] = useState(() =>
-    defaultObjective(workspace.domain)
+    defaultObjective(wiki.domain)
   )
   const [busy, setBusy] = useState<"registering" | "starting">()
   const [error, setError] = useState<string>()
@@ -57,7 +57,7 @@ export function WorkspaceAddDocument({
   function reset() {
     setDocument(undefined)
     setSourceFiles(undefined)
-    setObjective(defaultObjective(workspace.domain))
+    setObjective(defaultObjective(wiki.domain))
     setBusy(undefined)
     setError(undefined)
   }
@@ -131,7 +131,7 @@ export function WorkspaceAddDocument({
             <SheetHeader>
               <SheetTitle>Add document</SheetTitle>
               <SheetDescription>
-                Add a source for Amend to connect with this workspace.
+                Add a source for Amend to connect with this wiki.
               </SheetDescription>
             </SheetHeader>
             <FieldGroup className="scroll-fade gap-5 overflow-y-auto px-6 pb-6">

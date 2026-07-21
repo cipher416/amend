@@ -2,33 +2,29 @@ import { QueryClient } from "@tanstack/react-query"
 import type {
   WikiIngestChangedEvent,
   WikiIngestJob,
-  WorkspaceSummary,
+  WikiSummary,
 } from "@workspace/contract"
 import { describe, expect, it } from "vitest"
 
-import { projectWorkspaceIngestChanged } from "./workspace-ingest-events"
-import {
-  workspaceCurrentKey,
-  workspaceIngestKey,
-  workspacesKey,
-} from "./workspace-queries"
+import { projectWikiIngestChanged } from "./wiki-ingest-events"
+import { wikiCurrentKey, wikiIngestKey, wikisKey } from "./wiki-queries"
 
-describe("projectWorkspaceIngestChanged", () => {
-  it("ignores stale revisions before changing workspace caches", () => {
+describe("projectWikiIngestChanged", () => {
+  it("ignores stale revisions before changing wiki caches", () => {
     const queryClient = new QueryClient()
     const currentJob = completedJob(2)
-    queryClient.setQueryData(workspaceIngestKey("workspace-id"), currentJob)
-    queryClient.setQueryData(workspacesKey, [
+    queryClient.setQueryData(wikiIngestKey("wiki-id"), currentJob)
+    queryClient.setQueryData(wikisKey, [
       {
-        id: "workspace-id",
+        id: "wiki-id",
         name: "Reliability Wiki",
         displayPath: "/research/Reliability Wiki",
         active: true,
         running: false,
       },
     ])
-    queryClient.setQueryData<WorkspaceSummary>(workspaceCurrentKey, {
-      id: "workspace-id",
+    queryClient.setQueryData<WikiSummary>(wikiCurrentKey, {
+      id: "wiki-id",
       name: "Reliability Wiki",
       domain: "Database reliability engineering",
       displayPath: "/research/Reliability Wiki",
@@ -36,25 +32,23 @@ describe("projectWorkspaceIngestChanged", () => {
       setupStatus: "ready",
     })
 
-    projectWorkspaceIngestChanged(queryClient, {
-      workspaceId: "workspace-id",
+    projectWikiIngestChanged(queryClient, {
+      wikiId: "wiki-id",
       job: { ...currentJob, revision: 1, status: "running", result: undefined },
     })
 
     expect(
-      queryClient.getQueryData<WikiIngestJob>(
-        workspaceIngestKey("workspace-id")
-      )
+      queryClient.getQueryData<WikiIngestJob>(wikiIngestKey("wiki-id"))
     ).toEqual(currentJob)
-    expect(queryClient.getQueryData(workspacesKey)).toMatchObject([
+    expect(queryClient.getQueryData(wikisKey)).toMatchObject([
       { running: false },
     ])
-    expect(
-      queryClient.getQueryData<WorkspaceSummary>(workspaceCurrentKey)
-    ).toMatchObject({
-      commitHash: "new-commit",
-      setupStatus: "ready",
-    })
+    expect(queryClient.getQueryData<WikiSummary>(wikiCurrentKey)).toMatchObject(
+      {
+        commitHash: "new-commit",
+        setupStatus: "ready",
+      }
+    )
   })
 })
 

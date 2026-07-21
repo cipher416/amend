@@ -11,10 +11,10 @@ import { Input } from "@workspace/ui/components/input"
 import { useEffect, useEffectEvent, useRef, useState } from "react"
 import type { RefObject } from "react"
 
-const allMatchesHighlight = "workspace-file-search"
-const currentMatchHighlight = "workspace-file-search-current"
+const allMatchesHighlight = "wiki-file-search"
+const currentMatchHighlight = "wiki-file-search-current"
 
-export function WorkspaceFileSearch({
+export function WikiFileSearch({
   file,
   contentRef,
 }: {

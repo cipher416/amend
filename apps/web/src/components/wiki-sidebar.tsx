@@ -1,8 +1,8 @@
 import type {
   AmendApi,
   WikiFileTreeItem,
-  WorkspaceListItem,
-  WorkspaceSummary,
+  WikiListItem,
+  WikiSummary,
 } from "@workspace/contract"
 import { useEffect, useState } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
@@ -43,15 +43,15 @@ import {
 } from "@workspace/ui/components/sidebar"
 import { Spinner } from "@workspace/ui/components/spinner"
 
-import { WorkspaceAddDocument } from "./workspace-add-document"
-import { WorkspaceAvatar } from "./workspace-avatar"
-import { WorkspaceSearch } from "./workspace-search"
 import { ThemeMenu } from "./theme"
+import { WikiAddDocument } from "./wiki-add-document"
+import { WikiAvatar } from "./wiki-avatar"
+import { WikiSearch } from "./wiki-search"
 
-export function WorkspaceSidebar({
+export function WikiSidebar({
   desktop,
-  workspace,
-  workspaces,
+  wiki,
+  wikis,
   files,
   selectedPath,
   switching,
@@ -59,8 +59,8 @@ export function WorkspaceSidebar({
   running,
 }: {
   desktop: AmendApi
-  workspace: WorkspaceSummary
-  workspaces: readonly WorkspaceListItem[]
+  wiki: WikiSummary
+  wikis: readonly WikiListItem[]
   files: readonly WikiFileTreeItem[]
   selectedPath?: string
   switching: boolean
@@ -70,16 +70,12 @@ export function WorkspaceSidebar({
   return (
     <>
       <SidebarHeader>
-        <WorkspacePicker
-          workspace={workspace}
-          workspaces={workspaces}
-          switching={switching}
-        />
-        <WorkspaceSearch desktop={desktop} workspace={workspace} />
-        <WorkspaceAddDocument
-          key={workspace.id}
+        <WikiPicker wiki={wiki} wikis={wikis} switching={switching} />
+        <WikiSearch desktop={desktop} wiki={wiki} />
+        <WikiAddDocument
+          key={wiki.id}
           desktop={desktop}
-          workspace={workspace}
+          wiki={wiki}
           running={running}
         />
       </SidebarHeader>
@@ -94,7 +90,7 @@ export function WorkspaceSidebar({
               </div>
             ) : files.length ? (
               <FileTree
-                workspaceId={workspace.id}
+                wikiId={wiki.id}
                 files={files}
                 selectedPath={selectedPath}
               />
@@ -113,13 +109,13 @@ export function WorkspaceSidebar({
   )
 }
 
-function WorkspacePicker({
-  workspace,
-  workspaces,
+function WikiPicker({
+  wiki,
+  wikis,
   switching,
 }: {
-  workspace: WorkspaceSummary
-  workspaces: readonly WorkspaceListItem[]
+  wiki: WikiSummary
+  wikis: readonly WikiListItem[]
   switching: boolean
 }) {
   const navigate = useNavigate()
@@ -135,11 +131,8 @@ function WorkspacePicker({
           />
         }
       >
-        <WorkspaceAvatar
-          workspaceId={workspace.id}
-          className="size-6 shrink-0 rounded-md"
-        />
-        <span>{workspace.name}</span>
+        <WikiAvatar wikiId={wiki.id} className="size-6 shrink-0 rounded-md" />
+        <span>{wiki.name}</span>
         <HugeiconsIcon
           icon={ArrowDown01Icon}
           className="ml-auto transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
@@ -147,19 +140,16 @@ function WorkspacePicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent>
         <DropdownMenuRadioGroup
-          value={workspace.id}
-          onValueChange={(workspaceId) => {
-            void navigate({
-              to: "/workspace/$workspaceId",
-              params: { workspaceId },
-            })
+          value={wiki.id}
+          onValueChange={(wikiId) => {
+            void navigate({ to: "/wiki/$wikiId", params: { wikiId } })
           }}
         >
-          <DropdownMenuLabel>Switch workspace</DropdownMenuLabel>
-          {workspaces.map((item) => (
+          <DropdownMenuLabel>Switch wiki</DropdownMenuLabel>
+          {wikis.map((item) => (
             <DropdownMenuRadioItem key={item.id} value={item.id}>
-              <WorkspaceAvatar
-                workspaceId={item.id}
+              <WikiAvatar
+                wikiId={item.id}
                 className="size-5 shrink-0 rounded-sm"
               />
               <span>{item.name}</span>
@@ -174,7 +164,7 @@ function WorkspacePicker({
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() =>
-            void navigate({ to: "/", search: { createWorkspace: true } })
+            void navigate({ to: "/", search: { createWiki: true } })
           }
         >
           Create wiki
@@ -185,18 +175,18 @@ function WorkspacePicker({
 }
 
 function FileTree({
-  workspaceId,
+  wikiId,
   files,
   selectedPath,
 }: {
-  workspaceId: string
+  wikiId: string
   files: readonly WikiFileTreeItem[]
   selectedPath?: string
 }) {
   return (
     <SidebarMenu>
       <FileTreeItems
-        workspaceId={workspaceId}
+        wikiId={wikiId}
         files={files}
         selectedPath={selectedPath}
       />
@@ -205,18 +195,18 @@ function FileTree({
 }
 
 function FileTreeItems({
-  workspaceId,
+  wikiId,
   files,
   selectedPath,
 }: {
-  workspaceId: string
+  wikiId: string
   files: readonly WikiFileTreeItem[]
   selectedPath?: string
 }) {
   return files.map((file) => (
     <FileTreeRow
       key={file.path}
-      workspaceId={workspaceId}
+      wikiId={wikiId}
       item={file}
       selectedPath={selectedPath}
     />
@@ -224,18 +214,18 @@ function FileTreeItems({
 }
 
 function FileTreeRow({
-  workspaceId,
+  wikiId,
   item,
   selectedPath,
 }: {
-  workspaceId: string
+  wikiId: string
   item: WikiFileTreeItem
   selectedPath?: string
 }) {
   if (item.kind === "directory") {
     return (
       <DirectoryTreeRow
-        workspaceId={workspaceId}
+        wikiId={wikiId}
         item={item}
         selectedPath={selectedPath}
       />
@@ -246,10 +236,7 @@ function FileTreeRow({
     <SidebarMenuItem>
       <SidebarMenuButton
         render={
-          <Link
-            to="/workspace/$workspaceId/$"
-            params={{ workspaceId, _splat: item.path }}
-          />
+          <Link to="/wiki/$wikiId/$" params={{ wikiId, _splat: item.path }} />
         }
         isActive={selectedPath === item.path}
       >
@@ -261,11 +248,11 @@ function FileTreeRow({
 }
 
 function DirectoryTreeRow({
-  workspaceId,
+  wikiId,
   item,
   selectedPath,
 }: {
-  workspaceId: string
+  wikiId: string
   item: WikiFileTreeItem
   selectedPath?: string
 }) {
@@ -295,7 +282,7 @@ function DirectoryTreeRow({
           <CollapsibleContent>
             <SidebarMenuSub>
               <FileTreeItems
-                workspaceId={workspaceId}
+                wikiId={wikiId}
                 files={item.children}
                 selectedPath={selectedPath}
               />
