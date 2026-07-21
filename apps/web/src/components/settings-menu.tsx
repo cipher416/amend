@@ -86,7 +86,7 @@ export function SettingsMenu({ desktop }: { desktop: AmendApi }) {
         <HugeiconsIcon icon={Settings02Icon} />
       </SidebarMenuButton>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="flex max-h-[calc(100svh-2rem)] max-w-md flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+        <DialogContent className="flex max-h-[calc(100svh-2rem)] max-w-md flex-col gap-0 p-0 sm:max-w-md">
           {view === "connection" ? (
             <ConnectionSettings
               desktop={desktop}
@@ -223,7 +223,7 @@ function ConnectionSettings({
   onConnected: () => void
 }) {
   return (
-    <div className="min-h-0 flex-1 scroll-fade overflow-y-auto px-6 pb-6">
+    <div className="min-h-0 flex-1 scroll-fade overflow-y-auto px-6 pt-6 pb-6">
       <DialogTitle className="sr-only">AI connection</DialogTitle>
       <DialogDescription className="sr-only">
         Connect or change the AI provider Amend uses.
