@@ -553,6 +553,9 @@ function createDesktopApi({
   const api: MockAmendApi = {
     runtime: "electron",
     platform: "linux",
+    appearance: {
+      setTheme: vi.fn(async () => success(null)),
+    },
     workspaces: {
       chooseLocation: vi.fn(async () => success(null)),
       create: vi.fn(async () => success(workspaceSummary)),

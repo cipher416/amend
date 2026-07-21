@@ -13,6 +13,7 @@ import {
   isPiSetDefaultModelInput,
   isReadWikiFileInput,
   isStartPiOAuthLoginInput,
+  isThemeSource,
   isWikiSearchInput,
 } from "./index.ts"
 import {
@@ -42,6 +43,7 @@ describe("desktop contract validation", () => {
       getCurrentWorkspace: "amend:workspaces:current",
       listWorkspaces: "amend:workspaces:list",
       activateWorkspace: "amend:workspaces:activate",
+      setAppearanceTheme: "amend:appearance:set-theme",
       getProviderStatus: "amend:providers:status",
       listProviders: "amend:providers:list",
       listProviderModels: "amend:providers:list-models",
@@ -76,6 +78,7 @@ describe("desktop contract validation", () => {
       isActivateWorkspaceInput({ workspaceId: "workspace_12345678" })
     ).toBe(true)
     expect(isReadWikiFileInput({ path: "concepts/cache.md" })).toBe(true)
+    expect(isThemeSource("system")).toBe(true)
   })
 
   it("rejects paths, unknown fields, blank text, and unsafe filters", () => {
@@ -108,6 +111,7 @@ describe("desktop contract validation", () => {
     expect(isReadWikiFileInput({ path: "concepts/cache.md", extra: true })).toBe(
       false
     )
+    expect(isThemeSource("auto")).toBe(false)
   })
 
   it("validates main-process responses before exposing them", () => {

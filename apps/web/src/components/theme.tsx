@@ -7,6 +7,8 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react"
 import { createContext, useContext, useEffect, useState } from "react"
 import type { ReactNode } from "react"
+import { themeSources } from "@workspace/contract"
+import type { ThemeSource } from "@workspace/contract"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,9 +24,9 @@ import {
 } from "@workspace/ui/components/sidebar"
 
 const themeStorageKey = "amend-theme"
-const themes = ["light", "dark", "system"] as const
+const themes = themeSources
 
-type Theme = (typeof themes)[number]
+type Theme = ThemeSource
 
 interface ThemeContextValue {
   theme: Theme
@@ -46,6 +48,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (!ready) return
 
     applyTheme(theme)
+    const desktop = window.amend
+    if (desktop) {
+      void desktop.appearance.setTheme(theme).catch(() => undefined)
+    }
     try {
       localStorage.setItem(themeStorageKey, theme)
     } catch {
@@ -108,7 +114,6 @@ export function ThemeMenu() {
         <SidebarMenuButton
           aria-label="Settings"
           className="w-auto"
-          tooltip="Settings"
           type="button"
         >
           <HugeiconsIcon icon={Settings02Icon} />

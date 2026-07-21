@@ -1,9 +1,9 @@
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { app, BrowserWindow, session, shell } from "electron"
+import { app, BrowserWindow, nativeTheme, session, shell } from "electron"
 
-import { registerPiIpc, registerWikiIpc } from "./ipc"
+import { registerAppearanceIpc, registerPiIpc, registerWikiIpc } from "./ipc"
 import { PiCredentialService } from "./pi-credential-service"
 import { registerRendererProtocol } from "./renderer-protocol"
 import { rendererOrigin } from "./renderer-path"
@@ -18,6 +18,7 @@ let workspaceService: WorkspaceService | undefined
 let piCredentialService: PiCredentialService | undefined
 let disposeIpc: (() => void) | undefined
 let disposePiIpc: (() => void) | undefined
+let disposeAppearanceIpc: (() => void) | undefined
 let shutdownStarted = false
 let shutdownComplete = false
 
@@ -112,6 +113,7 @@ app.whenReady().then(async () => {
   const allowedOrigin = app.isPackaged
     ? rendererOrigin
     : new URL(developmentRendererUrl).origin
+  nativeTheme.themeSource = "system"
   workspaceService = new WorkspaceService({
     userDataPath: app.getPath("userData"),
     skillPath: resolveWikiSkillPath({
@@ -134,6 +136,10 @@ app.whenReady().then(async () => {
     allowedOrigin,
     getWindow: () => mainWindow,
   })
+  disposeAppearanceIpc = registerAppearanceIpc({
+    allowedOrigin,
+    getWindow: () => mainWindow,
+  })
   createWindow()
 
   app.on("activate", () => {
@@ -150,6 +156,7 @@ app.on("before-quit", (event) => {
   shutdownStarted = true
   void workspaceService.dispose().finally(() => {
     piCredentialService?.dispose()
+    disposeAppearanceIpc?.()
     disposePiIpc?.()
     disposeIpc?.()
     shutdownComplete = true

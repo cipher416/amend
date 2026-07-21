@@ -5,6 +5,7 @@ export const amendChannels = Object.freeze({
   getCurrentWorkspace: "amend:workspaces:current",
   listWorkspaces: "amend:workspaces:list",
   activateWorkspace: "amend:workspaces:activate",
+  setAppearanceTheme: "amend:appearance:set-theme",
   getProviderStatus: "amend:providers:status",
   listProviders: "amend:providers:list",
   listProviderModels: "amend:providers:list-models",

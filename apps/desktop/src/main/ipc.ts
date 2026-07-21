@@ -10,11 +10,12 @@ import {
   isPiSetDefaultModelInput,
   isReadWikiFileInput,
   isStartPiOAuthLoginInput,
+  isThemeSource,
   isWikiSearchInput,
 } from "@workspace/contract"
 import { amendChannels } from "@workspace/contract/channels"
 import type { AmendError, AmendResult } from "@workspace/contract"
-import { dialog, ipcMain } from "electron"
+import { dialog, ipcMain, nativeTheme } from "electron"
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron"
 
 import type { PiCredentialService } from "./pi-credential-service"
@@ -33,6 +34,19 @@ interface WikiIpcOptions extends IpcAuthContext {
 
 interface PiIpcOptions extends IpcAuthContext {
   service: PiCredentialService
+}
+
+export function registerAppearanceIpc(options: IpcAuthContext): () => void {
+  ipcMain.handle(
+    amendChannels.setAppearanceTheme,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isThemeSource(input)) return invalidInput()
+      nativeTheme.themeSource = input
+      return success(null)
+    })
+  )
+
+  return () => ipcMain.removeHandler(amendChannels.setAppearanceTheme)
 }
 
 export function registerWikiIpc(options: WikiIpcOptions): () => void {

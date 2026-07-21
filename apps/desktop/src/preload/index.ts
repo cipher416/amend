@@ -38,6 +38,7 @@ import type {
   PiSetDefaultModelInput,
   ReadWikiFileInput,
   StartPiOAuthLoginInput,
+  ThemeSource,
   WikiIngestChangedEvent,
   WikiSearchInput,
   WorkspaceParentSelection,
@@ -58,6 +59,11 @@ const workspaces = Object.freeze({
   list: () => invoke(amendChannels.listWorkspaces, isWorkspaceListItems),
   activate: (input: ActivateWorkspaceInput) =>
     invoke(amendChannels.activateWorkspace, isWorkspaceSummary, input),
+})
+
+const appearance = Object.freeze({
+  setTheme: (theme: ThemeSource) =>
+    invoke(amendChannels.setAppearanceTheme, isNull, theme),
 })
 
 const providers = Object.freeze({
@@ -145,6 +151,7 @@ const wiki = Object.freeze({
 const amendApi = Object.freeze({
   runtime: "electron" as const,
   platform: process.platform,
+  appearance,
   workspaces,
   providers,
   wiki,

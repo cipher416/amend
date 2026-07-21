@@ -324,6 +324,9 @@ function createDesktopApi(
   const api: MockAmendApi = {
     runtime: "electron",
     platform: "linux",
+    appearance: {
+      setTheme: vi.fn(async () => success(null)),
+    },
     providers: {
       status: vi.fn(async () =>
         success({ configured: options.piConfigured ?? true })

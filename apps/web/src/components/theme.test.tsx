@@ -3,6 +3,7 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { AmendApi } from "@workspace/contract"
 
 import { ThemeProvider, useTheme } from "./theme"
 
@@ -32,6 +33,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  delete window.amend
   vi.unstubAllGlobals()
 })
 
@@ -65,6 +67,24 @@ describe("theme support", () => {
     systemPrefersDark = true
     await act(() => systemThemeListener?.())
     expect(document.documentElement.classList.contains("dark")).toBe(true)
+  })
+
+  it("synchronizes selections with Electron's native theme", async () => {
+    const setTheme = vi.fn(async () => ({ ok: true as const, value: null }))
+    window.amend = {
+      appearance: {
+        setTheme,
+      },
+    } as unknown as AmendApi
+    const user = userEvent.setup()
+
+    renderThemeHarness()
+
+    await waitFor(() => expect(setTheme).toHaveBeenCalledWith("system"))
+    setTheme.mockClear()
+    await user.click(screen.getByRole("button", { name: "Use dark" }))
+
+    await waitFor(() => expect(setTheme).toHaveBeenCalledWith("dark"))
   })
 })
 

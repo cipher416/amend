@@ -243,6 +243,9 @@ export interface PiCancelLoginInput {
   loginId: string
 }
 
+export const themeSources = ["light", "dark", "system"] as const
+export type ThemeSource = (typeof themeSources)[number]
+
 export type PiLoginEvent =
   | { loginId: string; type: "progress"; message: string }
   | { loginId: string; type: "auth"; url: string; instructions?: string }
@@ -260,6 +263,9 @@ export type PiLoginEvent =
 export interface AmendApi {
   readonly runtime: "electron"
   readonly platform: string
+  readonly appearance: {
+    setTheme: (theme: ThemeSource) => Promise<AmendResult<null>>
+  }
   readonly workspaces: {
     chooseLocation: () => Promise<AmendResult<WorkspaceParentSelection | null>>
     create: (
@@ -538,4 +544,10 @@ export function isPiCancelLoginInput(
   value: unknown
 ): value is PiCancelLoginInput {
   return Value.Check(piCancelLoginInputSchema, value)
+}
+
+export function isThemeSource(value: unknown): value is ThemeSource {
+  return (
+    typeof value === "string" && themeSources.some((theme) => theme === value)
+  )
 }
