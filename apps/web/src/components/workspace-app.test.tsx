@@ -9,6 +9,7 @@ import type {
   ReadWikiFileInput,
   WikiFileContent,
   WikiIngestChangedEvent,
+  WikiIngestJob,
   WikiFileTreeItem,
   WorkspaceSummary,
 } from "@workspace/contract"
@@ -88,32 +89,68 @@ vi.mock("@workspace/ui/components/button", () => ({
   }) => <button {...props} />,
 }))
 
-vi.mock("@workspace/ui/components/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
+vi.mock("@workspace/ui/components/dropdown-menu", async () => {
+  const React = await import("react")
+  const menuGroupContext = React.createContext(false)
+  const MenuGroupProvider = menuGroupContext.Provider
+
+  return {
+    DropdownMenu: ({ children }: { children: ReactNode }) => (
+      <div>{children}</div>
+    ),
+    DropdownMenuTrigger: ({
+      render: _render,
+      children,
+      ...props
+    }: ButtonHTMLAttributes<HTMLButtonElement> & {
+      render?: ReactNode
+    }) => <button {...props}>{children}</button>,
+    DropdownMenuContent: ({ children }: { children: ReactNode }) => (
+      <div role="menu">{children}</div>
+    ),
+    DropdownMenuLabel: ({ children }: { children: ReactNode }) => {
+      if (!React.useContext(menuGroupContext)) {
+        throw new Error("Menu group parts must be used within a radio group.")
+      }
+      return <span>{children}</span>
+    },
+    DropdownMenuItem: ({
+      children,
+      ...props
+    }: ButtonHTMLAttributes<HTMLButtonElement>) => (
+      <button {...props}>{children}</button>
+    ),
+    DropdownMenuRadioGroup: ({ children }: { children: ReactNode }) => (
+      <MenuGroupProvider value>
+        <div>{children}</div>
+      </MenuGroupProvider>
+    ),
+    DropdownMenuRadioItem: ({
+      children,
+    }: {
+      children: ReactNode
+      value: string
+    }) => <button role="menuitemradio">{children}</button>,
+    DropdownMenuSeparator: () => <hr />,
+  }
+})
+
+vi.mock("@workspace/ui/components/sheet", () => ({
+  Sheet: ({ open, children }: { open: boolean; children: ReactNode }) =>
+    open ? <div>{children}</div> : null,
+  SheetContent: ({ children }: { children: ReactNode }) => (
+    <section>{children}</section>
   ),
-  DropdownMenuTrigger: ({
-    render: _render,
-    children,
-    ...props
-  }: ButtonHTMLAttributes<HTMLButtonElement> & {
-    render?: ReactNode
-  }) => <button {...props}>{children}</button>,
-  DropdownMenuContent: ({ children }: { children: ReactNode }) => (
-    <div role="menu">{children}</div>
+  SheetDescription: ({ children }: { children: ReactNode }) => (
+    <p>{children}</p>
   ),
-  DropdownMenuLabel: ({ children }: { children: ReactNode }) => (
-    <span>{children}</span>
+  SheetFooter: ({ children }: { children: ReactNode }) => (
+    <footer>{children}</footer>
   ),
-  DropdownMenuRadioGroup: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
+  SheetHeader: ({ children }: { children: ReactNode }) => (
+    <header>{children}</header>
   ),
-  DropdownMenuRadioItem: ({
-    children,
-  }: {
-    children: ReactNode
-    value: string
-  }) => <button role="menuitemradio">{children}</button>,
+  SheetTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
 }))
 
 beforeEach(() => {
@@ -159,6 +196,68 @@ describe("workspace app", () => {
       path: "concepts/write-ahead-logging.md",
     })
     expect(api.wiki.readFile).toHaveBeenCalledWith({ path: "paper.pdf" })
+  })
+
+  it("opens an existing workspace from the workspace picker", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Open workspace" })
+    )
+
+    await waitFor(() => expect(api.workspaces.open).toHaveBeenCalledOnce())
+  })
+
+  it("adds a document with editable workspace guidance", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    const source = new File(["source"], "incident-review.md", {
+      type: "text/markdown",
+    })
+    window.amend = api
+
+    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add document" })
+    )
+    const objective = await screen.findByLabelText("What matters?")
+    expect((objective as HTMLTextAreaElement).value).toBe(
+      "Capture concepts, evidence, and tradeoffs relevant to Database reliability engineering."
+    )
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    if (!input) throw new Error("Expected the document file input")
+    await user.upload(input, source)
+
+    await waitFor(() =>
+      expect(api.wiki.registerDocument).toHaveBeenCalledWith(source)
+    )
+    await user.clear(objective)
+    await user.type(objective, "Preserve incident response decisions")
+    await user.click(screen.getByRole("button", { name: "Add to wiki" }))
+
+    await waitFor(() =>
+      expect(api.wiki.startIngest).toHaveBeenCalledWith({
+        documentToken: "document_1234567890",
+        objective: "Preserve incident response decisions",
+      })
+    )
+    expect(screen.queryByRole("heading", { name: "Add document" })).toBeNull()
+  })
+
+  it("disables adding a document while the active workspace is ingesting", async () => {
+    const api = createDesktopApi({ activeWorkspaceRunning: true })
+    window.amend = api
+
+    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+
+    expect(
+      await screen.findByRole("button", { name: "Add document" })
+    ).toHaveProperty("disabled", true)
   })
 
   it("navigates wikilinks inside Markdown and opens external links separately", async () => {
@@ -232,33 +331,7 @@ describe("workspace app", () => {
     await act(() => {
       api.emitIngestChanged({
         workspaceId: archiveWorkspaceSummary.id,
-        job: {
-          id: "ingest_1234567890",
-          title: "Paper",
-          status: "completed",
-          phase: "indexing",
-          message: "Done",
-          startedAt: "2026-07-20T12:00:00.000Z",
-          updatedAt: "2026-07-20T12:00:01.000Z",
-          revision: 2,
-          cancellable: false,
-          result: {
-            runId: "run-id",
-            commitHash: "commit",
-            changedFiles: ["concepts/paper.md"],
-            summary: "Done",
-            index: {
-              status: "ready",
-              summary: {
-                commitHash: "commit",
-                added: 1,
-                updated: 0,
-                removed: 0,
-                unchanged: 0,
-              },
-            },
-          },
-        },
+        job: completedIngestJob,
       })
     })
 
@@ -267,6 +340,24 @@ describe("workspace app", () => {
         "Running"
       )
     )
+  })
+
+  it("refreshes active workspace files after an ingest completes", async () => {
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWorkspaceApp(api, { initialWorkspaceId: workspaceSummary.id })
+
+    await screen.findByRole("button", { name: "Add document" })
+    await waitFor(() => expect(api.wiki.listFiles).toHaveBeenCalledOnce())
+    await act(() => {
+      api.emitIngestChanged({
+        workspaceId: workspaceSummary.id,
+        job: completedIngestJob,
+      })
+    })
+
+    await waitFor(() => expect(api.wiki.listFiles).toHaveBeenCalledTimes(2))
   })
 
   it("does not read a file when the route workspace cannot be activated", async () => {
@@ -338,7 +429,9 @@ type MockAmendApi = AmendApi & {
   emitIngestChanged: (event: WikiIngestChangedEvent) => void
 }
 
-function createDesktopApi(): MockAmendApi {
+function createDesktopApi({
+  activeWorkspaceRunning = false,
+}: { activeWorkspaceRunning?: boolean } = {}): MockAmendApi {
   const ingestListeners = new Set<(event: WikiIngestChangedEvent) => void>()
   const api: MockAmendApi = {
     runtime: "electron",
@@ -355,7 +448,7 @@ function createDesktopApi(): MockAmendApi {
             name: workspaceSummary.name,
             displayPath: workspaceSummary.displayPath,
             active: true,
-            running: false,
+            running: activeWorkspaceRunning,
           },
           {
             id: archiveWorkspaceSummary.id,
@@ -480,6 +573,34 @@ const archiveWorkspaceSummary: WorkspaceSummary = {
   displayPath: "/research/Archive Wiki",
   commitHash: "commit",
   setupStatus: "ready",
+}
+
+const completedIngestJob: WikiIngestJob = {
+  id: "ingest_1234567890",
+  title: "Paper",
+  status: "completed",
+  phase: "indexing",
+  message: "Done",
+  startedAt: "2026-07-20T12:00:00.000Z",
+  updatedAt: "2026-07-20T12:00:01.000Z",
+  revision: 2,
+  cancellable: false,
+  result: {
+    runId: "run-id",
+    commitHash: "commit",
+    changedFiles: ["concepts/paper.md"],
+    summary: "Done",
+    index: {
+      status: "ready",
+      summary: {
+        commitHash: "commit",
+        added: 1,
+        updated: 0,
+        removed: 0,
+        unchanged: 0,
+      },
+    },
+  },
 }
 
 function success<T>(value: T): AmendResult<T> {

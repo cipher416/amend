@@ -70,6 +70,10 @@ function WorkspaceAppContent() {
     return <WorkspaceNotReady />
   }
 
+  const running = workspaces.some(
+    (item) => item.id === workspace.id && item.running
+  )
+
   return (
     <WorkspaceViewContext.Provider
       value={{ desktop, workspace, files, busy, error }}
@@ -77,6 +81,7 @@ function WorkspaceAppContent() {
       <WorkspaceShell
         sidebar={
           <WorkspaceSidebar
+            desktop={desktop}
             workspace={workspace}
             workspaces={workspaces}
             files={files}
@@ -85,6 +90,7 @@ function WorkspaceAppContent() {
             loadingFiles={busy === "files"}
             openingWorkspace={busy === "open"}
             onOpenWorkspace={openWorkspace}
+            running={running}
           />
         }
       >

@@ -1,4 +1,5 @@
 import type {
+  AmendApi,
   WikiFileTreeItem,
   WorkspaceListItem,
   WorkspaceSummary,
@@ -13,7 +14,6 @@ import {
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Badge } from "@workspace/ui/components/badge"
-import { Button } from "@workspace/ui/components/button"
 import {
   Collapsible,
   CollapsibleContent,
@@ -22,14 +22,15 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@workspace/ui/components/dropdown-menu"
 import {
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -41,7 +42,10 @@ import {
 } from "@workspace/ui/components/sidebar"
 import { Spinner } from "@workspace/ui/components/spinner"
 
+import { WorkspaceAddDocument } from "./workspace-add-document"
+
 export function WorkspaceSidebar({
+  desktop,
   workspace,
   workspaces,
   files,
@@ -50,7 +54,9 @@ export function WorkspaceSidebar({
   loadingFiles,
   openingWorkspace,
   onOpenWorkspace,
+  running,
 }: {
+  desktop: AmendApi
   workspace: WorkspaceSummary
   workspaces: readonly WorkspaceListItem[]
   files: readonly WikiFileTreeItem[]
@@ -59,6 +65,7 @@ export function WorkspaceSidebar({
   loadingFiles: boolean
   openingWorkspace: boolean
   onOpenWorkspace: () => Promise<string | null>
+  running: boolean
 }) {
   return (
     <>
@@ -67,6 +74,14 @@ export function WorkspaceSidebar({
           workspace={workspace}
           workspaces={workspaces}
           switching={switching}
+          opening={openingWorkspace}
+          onOpenWorkspace={onOpenWorkspace}
+        />
+        <WorkspaceAddDocument
+          key={workspace.id}
+          desktop={desktop}
+          workspace={workspace}
+          running={running}
         />
       </SidebarHeader>
       <SidebarContent>
@@ -92,12 +107,6 @@ export function WorkspaceSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
-        <OpenWorkspaceButton
-          opening={openingWorkspace}
-          onOpenWorkspace={onOpenWorkspace}
-        />
-      </SidebarFooter>
     </>
   )
 }
@@ -106,58 +115,12 @@ function WorkspacePicker({
   workspace,
   workspaces,
   switching,
+  opening,
+  onOpenWorkspace,
 }: {
   workspace: WorkspaceSummary
   workspaces: readonly WorkspaceListItem[]
   switching: boolean
-}) {
-  const navigate = useNavigate()
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <SidebarMenuButton
-            size="lg"
-            disabled={switching || workspaces.length < 2}
-          />
-        }
-      >
-        <HugeiconsIcon icon={Folder01Icon} />
-        <span>{workspace.name}</span>
-        <HugeiconsIcon icon={ArrowDown01Icon} className="ml-auto" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent>
-        <DropdownMenuLabel>Switch workspace</DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={workspace.id}
-          onValueChange={(workspaceId) => {
-            void navigate({
-              to: "/workspace/$workspaceId",
-              params: { workspaceId },
-            })
-          }}
-        >
-          {workspaces.map((item) => (
-            <DropdownMenuRadioItem key={item.id} value={item.id}>
-              <span>{item.name}</span>
-              {item.running ? (
-                <Badge className="mr-4 ml-auto" variant="secondary">
-                  Running
-                </Badge>
-              ) : null}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-function OpenWorkspaceButton({
-  opening,
-  onOpenWorkspace,
-}: {
   opening: boolean
   onOpenWorkspace: () => Promise<string | null>
 }) {
@@ -173,16 +136,45 @@ function OpenWorkspaceButton({
   }
 
   return (
-    <Button
-      type="button"
-      variant="outline"
-      className="mt-3 w-full"
-      disabled={opening}
-      onClick={() => void openWorkspace()}
-    >
-      {opening ? <Spinner data-icon="inline-start" /> : null}
-      Open workspace
-    </Button>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={<SidebarMenuButton size="lg" disabled={switching || opening} />}
+      >
+        <HugeiconsIcon icon={Folder01Icon} />
+        <span>{workspace.name}</span>
+        <HugeiconsIcon icon={ArrowDown01Icon} className="ml-auto" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuRadioGroup
+          value={workspace.id}
+          onValueChange={(workspaceId) => {
+            void navigate({
+              to: "/workspace/$workspaceId",
+              params: { workspaceId },
+            })
+          }}
+        >
+          <DropdownMenuLabel>Switch workspace</DropdownMenuLabel>
+          {workspaces.map((item) => (
+            <DropdownMenuRadioItem key={item.id} value={item.id}>
+              <span>{item.name}</span>
+              {item.running ? (
+                <Badge className="mr-4 ml-auto" variant="secondary">
+                  Running
+                </Badge>
+              ) : null}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={opening}
+          onClick={() => void openWorkspace()}
+        >
+          Open workspace
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

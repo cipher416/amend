@@ -122,7 +122,6 @@ function useWorkspaceSessionState({
     },
     queryClient
   )
-
   useEffect(() => {
     if (currentWorkspace.isPending || activateWorkspace.isPending) return
     if (currentWorkspace.data?.id === workspaceId) return
