@@ -47,11 +47,11 @@ interface WorkflowState {
   sourceFiles?: File[]
   job?: WikiIngestJob
   wikiName: string
-  domain: string
-  objective: string
+  wikiNameEdited: boolean
+  focus: string
 }
 
-type EditableField = "wikiName" | "domain" | "objective"
+type EditableField = "wikiName" | "focus"
 
 interface WorkflowStepViewProps {
   api: AmendApi
@@ -68,14 +68,12 @@ interface WorkflowStepViewProps {
   onRegisterDocument: (file: File) => void
   onDocumentError: (message: string) => void
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
-  onCancel: () => void
 }
 
 interface WorkflowActions {
   chooseHome: () => Promise<void>
   registerDocument: (file: File) => Promise<void>
   createWiki: (event: React.FormEvent<HTMLFormElement>) => Promise<void>
-  cancelIngest: () => Promise<void>
   retryIndex: () => Promise<void>
   changeField: (field: EditableField, value: string) => void
 }
@@ -85,7 +83,6 @@ interface WorkflowActionsInput {
   state: WorkflowState
   wiki?: WikiSummary
   home?: WikiHome
-  job?: WikiIngestJob
   queryClient: QueryClient
   dispatch: React.Dispatch<WorkflowAction>
 }
@@ -110,8 +107,8 @@ type WorkflowAction =
 const initialWorkflowState: WorkflowState = {
   busy: null,
   wikiName: "",
-  domain: "",
-  objective: "",
+  wikiNameEdited: false,
+  focus: "",
 }
 
 export function WikiWorkflow({
@@ -214,7 +211,6 @@ export function WikiWorkflow({
     state,
     wiki,
     home,
-    job,
     queryClient,
     dispatch,
   })
@@ -239,7 +235,6 @@ export function WikiWorkflow({
         dispatch({ type: "operation-failed", message })
       }
       onSubmit={(event) => void actions.createWiki(event)}
-      onCancel={() => void actions.cancelIngest()}
       home={home}
     />
   )
@@ -250,7 +245,6 @@ function useWikiWorkflowActions({
   state,
   wiki,
   home,
-  job,
   queryClient,
   dispatch,
 }: WorkflowActionsInput): WorkflowActions {
@@ -299,20 +293,23 @@ function useWikiWorkflowActions({
         return
       }
 
+      const wikiName = state.wikiName.trim()
+      const focus = state.focus.trim()
+
       let targetWiki = wiki
       if (!targetWiki) {
         if (!home) {
           dispatch({
             type: "operation-failed",
-            message: "Choose an Amend home before creating a wiki.",
+            message: "Choose a wiki home before creating a wiki.",
           })
           return
         }
         dispatch({ type: "operation-started", operation: "create" })
         try {
           const response = await api.wikis.create({
-            name: state.wikiName,
-            domain: state.domain,
+            name: wikiName,
+            domain: focus || wikiName,
           })
           if (!response.ok) {
             dispatch({
@@ -331,11 +328,15 @@ function useWikiWorkflowActions({
         }
       }
 
+      const domain = targetWiki.domain
+
       dispatch({ type: "operation-started", operation: "ingest" })
       try {
         const response = await api.wiki.startIngest({
           documentToken: state.document.token,
-          objective: state.objective,
+          objective:
+            focus ||
+            `Capture the central concepts, evidence, and important tradeoffs relevant to ${domain}.`,
         })
         if (!response.ok) {
           dispatch({
@@ -351,20 +352,6 @@ function useWikiWorkflowActions({
           dispatch({
             type: "ingest-changed",
             event: { wikiId: targetWiki.id, job: snapshot.value },
-          })
-        }
-      } catch (cause) {
-        dispatch({ type: "operation-failed", message: errorMessage(cause) })
-      }
-    },
-    cancelIngest: async () => {
-      if (!job?.cancellable) return
-      try {
-        const response = await api.wiki.cancelIngest({ jobId: job.id })
-        if (!response.ok) {
-          dispatch({
-            type: "operation-failed",
-            message: response.error.message,
           })
         }
       } catch (cause) {
@@ -411,7 +398,6 @@ function WorkflowStepView({
   onRegisterDocument,
   onDocumentError,
   onSubmit,
-  onCancel,
 }: WorkflowStepViewProps) {
   return (
     <WorkflowShell>
@@ -430,11 +416,10 @@ function WorkflowStepView({
         <WikiSetupStep
           wiki={wiki}
           wikiName={state.wikiName}
-          domain={state.domain}
           home={home}
           document={state.document}
           sourceFiles={state.sourceFiles}
-          objective={state.objective}
+          focus={state.focus}
           job={job}
           busy={state.busy !== null}
           submitting={state.busy === "create" || state.busy === "ingest"}
@@ -444,7 +429,6 @@ function WorkflowStepView({
           onRegisterDocument={onRegisterDocument}
           onDocumentError={onDocumentError}
           onSubmit={onSubmit}
-          onCancel={onCancel}
         />
       )}
     </WorkflowShell>
@@ -468,7 +452,12 @@ function workflowReducer(
     case "pi-connected":
       return { ...state, piConfigured: true }
     case "field-changed":
-      return { ...state, [action.field]: action.value }
+      return {
+        ...state,
+        [action.field]: action.value,
+        wikiNameEdited:
+          action.field === "wikiName" ? true : state.wikiNameEdited,
+      }
     case "operation-started":
       return { ...state, busy: action.operation, error: undefined }
     case "operation-finished":
@@ -482,6 +471,9 @@ function workflowReducer(
         ...state,
         document: action.document,
         sourceFiles: action.sourceFiles,
+        wikiName: state.wikiNameEdited
+          ? state.wikiName
+          : suggestedWikiName(action.document.suggestedTitle),
         job: undefined,
         busy: null,
         error: undefined,
@@ -519,6 +511,19 @@ function workflowReducer(
         busy: null,
       }
   }
+}
+
+function suggestedWikiName(title: string): string {
+  const suggestion = title
+    .trim()
+    .replaceAll("/", "-")
+    .replaceAll("\\", "-")
+    .replaceAll("\0", "-")
+    .slice(0, 80)
+    .trim()
+  return suggestion && suggestion !== "." && suggestion !== ".."
+    ? suggestion
+    : "Document"
 }
 
 function applyIngestEvent(

@@ -235,12 +235,51 @@ describe("first source workflow", () => {
     await screen.findByText("Wiki ready")
     expect(api.wikis.create).toHaveBeenCalledWith({
       name: "Reliability Wiki",
-      domain: "Database reliability engineering",
+      domain: "Recovery ordering and replication tradeoffs",
     })
     expect(api.wikis.chooseHome).toHaveBeenCalledOnce()
     expect(api.wiki.startIngest).toHaveBeenCalledWith({
       documentToken: "document_1234567890",
-      objective: "Capture recovery ordering",
+      objective: "Recovery ordering and replication tradeoffs",
+    })
+  })
+
+  it("requires a wiki home and derives defaults from the first document", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+    render(<WikiWorkflow />)
+
+    await screen.findByRole("heading", { name: "Create your wiki" })
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    if (!input) throw new Error("Expected the document file input")
+    expect(input.disabled).toBe(true)
+    expect(screen.queryByLabelText("Wiki name")).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "Wiki home" }))
+    expect(input.disabled).toBe(false)
+    await user.upload(
+      input,
+      new File(["source"], "write-ahead-logging.pdf", {
+        type: "application/pdf",
+      })
+    )
+
+    const wikiName = await screen.findByLabelText("Wiki name")
+    if (!(wikiName instanceof HTMLInputElement)) {
+      throw new Error("Expected the wiki name input")
+    }
+    expect(wikiName.value).toBe("write-ahead-logging")
+    await user.click(screen.getByRole("button", { name: "Build wiki" }))
+
+    expect(api.wikis.create).toHaveBeenCalledWith({
+      name: "write-ahead-logging",
+      domain: "write-ahead-logging",
+    })
+    expect(api.wiki.startIngest).toHaveBeenCalledWith({
+      documentToken: "document_1234567890",
+      objective:
+        "Capture the central concepts, evidence, and important tradeoffs relevant to write-ahead-logging.",
     })
   })
 
@@ -281,9 +320,14 @@ describe("first source workflow", () => {
     window.amend = api
     render(<WikiWorkflow />)
 
-    await screen.findByText("Writing and linking wiki pages")
-    expect(screen.getByText("Building your wiki")).toBeDefined()
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeDefined()
+    await screen.findByRole("heading", { name: "Building your wiki" })
+    expect(
+      screen.getByText(
+        "We're reading, organizing, and linking your first document. This may take a few minutes."
+      )
+    ).toBeDefined()
+    expect(screen.queryByText("Writing and linking wiki pages")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
     expect(api.wikis.current).toHaveBeenCalledOnce()
     expect(api.wiki.currentIngest).toHaveBeenCalledOnce()
   })
@@ -299,7 +343,9 @@ describe("first source workflow", () => {
     expect(
       screen.getByText("Your existing wiki is ready to browse.")
     ).toBeDefined()
-    expect(screen.queryByRole("heading", { name: "Create wiki" })).toBeNull()
+    expect(
+      screen.queryByRole("heading", { name: "Create your wiki" })
+    ).toBeNull()
   })
 
   it("starts sibling creation even when a wiki is already active", async () => {
@@ -309,7 +355,7 @@ describe("first source workflow", () => {
     window.amend = api
     render(<WikiWorkflow createWiki />)
 
-    await screen.findByRole("heading", { name: "Create wiki" })
+    await screen.findByRole("heading", { name: "Create your wiki" })
   })
 
   it("creates a sibling wiki only after its first source is selected", async () => {
@@ -333,7 +379,7 @@ describe("first source workflow", () => {
     expect(api.wiki.startIngest).toHaveBeenCalledOnce()
   })
 
-  it("shows the configured Amend home read-only when creating a sibling wiki", async () => {
+  it("shows the configured wiki home read-only when creating a sibling wiki", async () => {
     const api = createDesktopApi({
       wiki: { ...wikiSummary, setupStatus: "ready" },
       home: { displayPath: "/research" },
@@ -341,9 +387,9 @@ describe("first source workflow", () => {
     window.amend = api
     render(<WikiWorkflow createWiki />)
 
-    const home = await screen.findByLabelText("Amend home")
+    const home = await screen.findByLabelText("Wiki home")
     expect(home.tagName).toBe("P")
-    expect(screen.queryByRole("button", { name: "Amend home" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Wiki home" })).toBeNull()
   })
 
   it("explains that the browser scaffold cannot access local wiki data", async () => {
@@ -411,7 +457,7 @@ describe("Pi connection gate", () => {
       provider: "zai",
       model: "glm-5-turbo",
     })
-    await screen.findByRole("heading", { name: "Create wiki" })
+    await screen.findByRole("heading", { name: "Create your wiki" })
   })
 
   it("loads the provider models once OAuth completes", async () => {
@@ -496,10 +542,10 @@ function createDesktopApi(
     wikis: {
       chooseHome: vi.fn(async () => success({ displayPath: "/research" })),
       home: vi.fn(async () => success(options.home ?? null)),
-      create: vi.fn(async () => {
-        wiki = wikiSummary
+      create: vi.fn(async ({ name, domain }) => {
+        wiki = { ...wikiSummary, name, domain }
         upsertWikiItem(wikiItems, wiki, true, false)
-        return success(wikiSummary)
+        return success(wiki)
       }),
       current: vi.fn(async () => success(wiki)),
       list: vi.fn(async () => success(wikiItems)),
@@ -681,13 +727,8 @@ function createJob(
 async function createWiki(
   user: ReturnType<typeof userEvent.setup>
 ): Promise<void> {
-  await screen.findByRole("heading", { name: "Create wiki" })
-  await user.type(screen.getByLabelText("Wiki name"), "Reliability Wiki")
-  await user.type(
-    screen.getByLabelText("Domain"),
-    "Database reliability engineering"
-  )
-  await user.click(screen.getByRole("button", { name: "Amend home" }))
+  await screen.findByRole("heading", { name: "Create your wiki" })
+  await user.click(screen.getByRole("button", { name: "Wiki home" }))
   await screen.findAllByText("/research")
   const input = document.querySelector<HTMLInputElement>('input[type="file"]')
   if (!input) throw new Error("Expected the document file input")
@@ -698,11 +739,18 @@ async function createWiki(
     })
   )
   await screen.findByText("write-ahead-logging.pdf")
+  const wikiName = screen.getByLabelText("Wiki name")
+  if (!(wikiName instanceof HTMLInputElement)) {
+    throw new Error("Expected the wiki name input")
+  }
+  expect(wikiName.value).toBe("write-ahead-logging")
+  await user.clear(wikiName)
+  await user.type(wikiName, "Reliability Wiki")
   await user.type(
-    screen.getByLabelText("What matters?"),
-    "Capture recovery ordering"
+    screen.getByLabelText("What should Amend focus on? (optional)"),
+    "Recovery ordering and replication tradeoffs"
   )
-  await user.click(screen.getByRole("button", { name: "Create wiki" }))
+  await user.click(screen.getByRole("button", { name: "Build wiki" }))
 }
 
 function success<T>(value: T): AmendResult<T> {
