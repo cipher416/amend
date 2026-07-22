@@ -6,6 +6,7 @@ import type {
   WikiListItem,
   WikiSummary,
   WikiFileTreeItem,
+  WikiUpdateSession,
 } from "@workspace/contract"
 import {
   createContext,
@@ -19,14 +20,17 @@ import type { ReactNode } from "react"
 
 import { errorMessage } from "@/lib/amend-client"
 import { projectWikiIngestChanged } from "@/lib/wiki-ingest-events"
+import { projectWikiUpdateChanged } from "@/lib/wiki-update-events"
 import {
   activateWikiById,
   listFiles,
   listWikis,
   readCurrentWiki,
+  readCurrentUpdate,
   wikiCurrentKey,
   wikiFilesKey,
   wikiIngestKey,
+  wikiUpdateKey,
   wikisKey,
 } from "@/lib/wiki-queries"
 
@@ -45,6 +49,7 @@ interface WikiSessionValue {
   files: readonly WikiFileTreeItem[]
   busy: WikiBusy
   error?: string
+  update: WikiUpdateSession | null
   ingestCompletionNotice?: WikiIngestCompletionNotice
   dismissIngestCompletionNotice: (jobId: string) => void
   trackBackgroundIngest: (input: {
@@ -199,6 +204,16 @@ function useWikiSessionState({
     },
     queryClient
   )
+  const update = useQuery(
+    {
+      queryKey: readyWiki
+        ? wikiUpdateKey(readyWiki.id)
+        : ["wiki", "update", "disabled"],
+      queryFn: () => readCurrentUpdate(desktop),
+      enabled: Boolean(readyWiki && routeMatchesActiveWiki),
+    },
+    queryClient
+  )
 
   useEffect(
     () =>
@@ -207,6 +222,14 @@ function useWikiSessionState({
         showCompletedBackgroundIngest(event)
       }),
     [desktop, queryClient, showCompletedBackgroundIngest]
+  )
+
+  useEffect(
+    () =>
+      desktop.wiki.onUpdateChanged((event) => {
+        projectWikiUpdateChanged(queryClient, event)
+      }),
+    [desktop, queryClient]
   )
 
   const resolvingRouteWiki = Boolean(!readyWiki && !activateWiki.isError)
@@ -220,7 +243,8 @@ function useWikiSessionState({
     operationError ??
     queryErrorMessage(currentWiki.error) ??
     queryErrorMessage(wikis.error) ??
-    queryErrorMessage(files.error)
+    queryErrorMessage(files.error) ??
+    queryErrorMessage(update.error)
   const ingestCompletionNotice = ingestCompletionNotices[0]
 
   return {
@@ -231,6 +255,7 @@ function useWikiSessionState({
     files: files.data ?? [],
     busy,
     error,
+    update: update.data ?? null,
     ingestCompletionNotice,
     dismissIngestCompletionNotice,
     trackBackgroundIngest,

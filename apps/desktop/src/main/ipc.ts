@@ -1,6 +1,7 @@
 import {
   isActivateWikiInput,
   isCancelIngestInput,
+  isContinueWikiUpdateInput,
   isCreateWikiInput,
   isIngestDocumentInput,
   isPiCancelLoginInput,
@@ -9,9 +10,12 @@ import {
   isPiSaveApiKeyInput,
   isPiSetDefaultModelInput,
   isReadWikiFileInput,
+  isReadWikiUpdateDiffInput,
+  isStartWikiUpdateInput,
   isStartPiOAuthLoginInput,
   isThemeSource,
   isWikiSearchInput,
+  isWikiUpdateSessionInput,
 } from "@workspace/contract"
 import { amendChannels } from "@workspace/contract/channels"
 import type { AmendError, AmendResult } from "@workspace/contract"
@@ -54,6 +58,12 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
     const window = options.getWindow()
     if (window && !window.isDestroyed()) {
       window.webContents.send(amendChannels.ingestChanged, event)
+    }
+  })
+  const unsubscribeUpdate = options.service.subscribeUpdateChanged((event) => {
+    const window = options.getWindow()
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(amendChannels.wikiUpdateChanged, event)
     }
   })
 
@@ -207,6 +217,71 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
   )
 
   ipcMain.handle(
+    amendChannels.startWikiUpdate,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isStartWikiUpdateInput(input)) return invalidInput()
+      return await attempt(async () => options.service.startUpdate(input))
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.continueWikiUpdate,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isContinueWikiUpdateInput(input)) return invalidInput()
+      return await attempt(async () => {
+        options.service.continueUpdate(input)
+        return null
+      })
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.getCurrentWikiUpdate,
+    authorized(
+      options,
+      async () => await attempt(async () => options.service.getCurrentUpdate())
+    )
+  )
+
+  ipcMain.handle(
+    amendChannels.cancelWikiUpdateTurn,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isWikiUpdateSessionInput(input)) return invalidInput()
+      return await attempt(async () => {
+        options.service.cancelUpdateTurn(input)
+        return null
+      })
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.readWikiUpdateDiff,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isReadWikiUpdateDiffInput(input)) return invalidInput()
+      return await attempt(async () => options.service.readUpdateDiff(input))
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.applyWikiUpdate,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isWikiUpdateSessionInput(input)) return invalidInput()
+      return await attempt(async () => options.service.applyUpdate(input))
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.discardWikiUpdate,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isWikiUpdateSessionInput(input)) return invalidInput()
+      return await attempt(async () => {
+        await options.service.discardUpdate(input)
+        return null
+      })
+    })
+  )
+
+  ipcMain.handle(
     amendChannels.searchWiki,
     authorized(options, async (_event, input: unknown) => {
       if (!isWikiSearchInput(input)) return invalidInput()
@@ -224,6 +299,7 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
 
   return () => {
     unsubscribeIngest()
+    unsubscribeUpdate()
     for (const channel of [
       amendChannels.chooseWikiHome,
       amendChannels.getWikiHome,
@@ -239,6 +315,13 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
       amendChannels.refreshWikiIndex,
       amendChannels.listWikiFiles,
       amendChannels.readWikiFile,
+      amendChannels.startWikiUpdate,
+      amendChannels.continueWikiUpdate,
+      amendChannels.getCurrentWikiUpdate,
+      amendChannels.cancelWikiUpdateTurn,
+      amendChannels.readWikiUpdateDiff,
+      amendChannels.applyWikiUpdate,
+      amendChannels.discardWikiUpdate,
       amendChannels.searchWiki,
       amendChannels.listWikiTags,
     ]) {

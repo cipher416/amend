@@ -16,6 +16,8 @@ export type AmendErrorCode =
   | "pi-configuration-missing"
   | "pi-failed"
   | "unauthorized"
+  | "update-conflict"
+  | "update-failed"
   | "wiki-creation-failed"
   | "wiki-open-failed"
 
@@ -176,6 +178,95 @@ export interface WikiFileContent {
   content?: string
 }
 
+export interface StartWikiUpdateInput {
+  prompt: string
+  contextPath?: string
+}
+
+export interface ContinueWikiUpdateInput {
+  sessionId: string
+  prompt: string
+}
+
+export interface WikiUpdateSessionInput {
+  sessionId: string
+}
+
+export interface ReadWikiUpdateDiffInput extends WikiUpdateSessionInput {
+  path: string
+}
+
+export interface StartWikiUpdateResult {
+  sessionId: string
+}
+
+export type WikiUpdateSessionStatus =
+  "running" | "review" | "applying" | "failed"
+
+export interface WikiUpdateMessage {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  status: "streaming" | "complete"
+  createdAt: string
+}
+
+export interface WikiUpdateActivity {
+  id: string
+  tool:
+    "read" | "grep" | "find" | "ls" | "edit" | "write" | "validate" | "repair"
+  label: string
+  status: "running" | "complete" | "failed"
+}
+
+export interface WikiUpdateChangedFile {
+  path: string
+  status: "added" | "modified" | "deleted"
+  additions: number
+  deletions: number
+}
+
+export interface WikiUpdateProposal {
+  summary: string
+  changedFiles: readonly WikiUpdateChangedFile[]
+}
+
+export interface WikiUpdateSession {
+  id: string
+  wikiId: string
+  baseCommit: string
+  status: WikiUpdateSessionStatus
+  revision: number
+  updatedAt: string
+  cancellable: boolean
+  messages: readonly WikiUpdateMessage[]
+  activity: readonly WikiUpdateActivity[]
+  proposal?: WikiUpdateProposal
+  error?: AmendError
+  usage?: WikiUsage
+}
+
+export interface WikiUpdateChangedEvent {
+  wikiId: string
+  session: WikiUpdateSession | null
+}
+
+export interface WikiUpdateFileDiff {
+  path: string
+  patch: string
+}
+
+export interface WikiUpdateApplyResult {
+  runId: string
+  commitHash: string
+  changedFiles: readonly string[]
+  summary: string
+  usage?: WikiUsage
+  index:
+    | { status: "ready"; summary: WikiIndexRefreshSummary }
+    | { status: "failed"; error: AmendError }
+}
+
 export type WikiProgressPhase =
   | "preparing"
   | "reading"
@@ -306,12 +397,32 @@ export interface AmendApi {
     readFile: (
       input: ReadWikiFileInput
     ) => Promise<AmendResult<WikiFileContent>>
+    startUpdate: (
+      input: StartWikiUpdateInput
+    ) => Promise<AmendResult<StartWikiUpdateResult>>
+    continueUpdate: (
+      input: ContinueWikiUpdateInput
+    ) => Promise<AmendResult<null>>
+    currentUpdate: () => Promise<AmendResult<WikiUpdateSession | null>>
+    cancelUpdateTurn: (
+      input: WikiUpdateSessionInput
+    ) => Promise<AmendResult<null>>
+    readUpdateDiff: (
+      input: ReadWikiUpdateDiffInput
+    ) => Promise<AmendResult<WikiUpdateFileDiff>>
+    applyUpdate: (
+      input: WikiUpdateSessionInput
+    ) => Promise<AmendResult<WikiUpdateApplyResult>>
+    discardUpdate: (input: WikiUpdateSessionInput) => Promise<AmendResult<null>>
     search: (
       input: WikiSearchInput
     ) => Promise<AmendResult<readonly WikiSearchResult[]>>
     listTags: () => Promise<AmendResult<readonly WikiTagFacet[]>>
     onIngestChanged: (
       listener: (event: WikiIngestChangedEvent) => void
+    ) => () => void
+    onUpdateChanged: (
+      listener: (event: WikiUpdateChangedEvent) => void
     ) => () => void
   }
 }
@@ -469,6 +580,32 @@ export const readWikiFileInputSchema = Type.Object(
   { additionalProperties: false }
 )
 
+export const startWikiUpdateInputSchema = Type.Object(
+  {
+    prompt: nonBlankText(20_000),
+    contextPath: Type.Optional(wikiFilePathSchema),
+  },
+  { additionalProperties: false }
+)
+
+export const continueWikiUpdateInputSchema = Type.Object(
+  {
+    sessionId: idempotencyIdSchema,
+    prompt: nonBlankText(20_000),
+  },
+  { additionalProperties: false }
+)
+
+export const wikiUpdateSessionInputSchema = Type.Object(
+  { sessionId: idempotencyIdSchema },
+  { additionalProperties: false }
+)
+
+export const readWikiUpdateDiffInputSchema = Type.Object(
+  { sessionId: idempotencyIdSchema, path: wikiFilePathSchema },
+  { additionalProperties: false }
+)
+
 export function isCreateWikiInput(value: unknown): value is CreateWikiInput {
   return Value.Check(createWikiInputSchema, value)
 }
@@ -499,6 +636,30 @@ export function isReadWikiFileInput(
   value: unknown
 ): value is ReadWikiFileInput {
   return Value.Check(readWikiFileInputSchema, value)
+}
+
+export function isStartWikiUpdateInput(
+  value: unknown
+): value is StartWikiUpdateInput {
+  return Value.Check(startWikiUpdateInputSchema, value)
+}
+
+export function isContinueWikiUpdateInput(
+  value: unknown
+): value is ContinueWikiUpdateInput {
+  return Value.Check(continueWikiUpdateInputSchema, value)
+}
+
+export function isWikiUpdateSessionInput(
+  value: unknown
+): value is WikiUpdateSessionInput {
+  return Value.Check(wikiUpdateSessionInputSchema, value)
+}
+
+export function isReadWikiUpdateDiffInput(
+  value: unknown
+): value is ReadWikiUpdateDiffInput {
+  return Value.Check(readWikiUpdateDiffInputSchema, value)
 }
 
 export function isPiListModelsInput(

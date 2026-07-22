@@ -11,6 +11,10 @@ import type {
   WikiEngine,
   WikiRunResult,
 } from "@workspace/wiki-engine/ingest"
+import type {
+  WikiUpdateAgentSession,
+  WikiUpdateProposalSession,
+} from "@workspace/wiki-engine/update"
 
 import { WikiHome } from "./wiki-home.ts"
 import { WikiService, WikiServiceError } from "./wiki-service.ts"
@@ -742,6 +746,55 @@ describe("wiki service", () => {
     ])
     await service.dispose()
   })
+
+  it("streams a wiki update, reconnects to review, and applies it", async () => {
+    const parent = await temporaryDirectory()
+    const calls: string[] = []
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      createId: () => "123e4567-e89b-42d3-a456-426614174040",
+      createEngine: () => createFakeEngine(calls, []),
+      createUpdateAgent: async () => createFakeUpdateAgent(),
+      createUpdateProposal: async () => createFakeUpdateProposal(calls),
+      openIndex: async () => createFakeIndex(calls),
+    })
+    await service.setWikiHome(parent)
+    await service.createWiki({ name: "Wiki", domain: "Research" })
+    const events: Array<{ status: string; revision: number }> = []
+    service.subscribeUpdateChanged(({ session }) => {
+      if (session)
+        events.push({ status: session.status, revision: session.revision })
+    })
+
+    const started = await service.startUpdate({
+      prompt: "Clarify the page.",
+      contextPath: "concepts/page.md",
+    })
+    const session = await waitForUpdateReview(service)
+
+    assert.equal(session.id, started.sessionId)
+    assert.equal(session.messages.at(-1)?.content, "Updated the page.")
+    assert.equal(session.activity[0]?.label, "Edited concepts/page.md")
+    assert.equal(session.proposal?.changedFiles[0]?.path, "concepts/page.md")
+    assert.deepEqual(
+      await service.readUpdateDiff({
+        sessionId: session.id,
+        path: "concepts/page.md",
+      }),
+      { path: "concepts/page.md", patch: "@@ -1 +1 @@" }
+    )
+
+    const result = await service.applyUpdate({ sessionId: session.id })
+
+    assert.equal(result.commitHash, "update-commit")
+    assert.equal(service.getCurrentUpdate(), null)
+    assert.equal(service.getCurrentWiki()?.commitHash, "update-commit")
+    assert.ok(events.some(({ status }) => status === "running"))
+    assert.equal(events.at(-1)?.status, "applying")
+    assert.ok(calls.includes("apply-update"))
+    await service.dispose()
+  })
 })
 
 async function waitForTerminalJob(
@@ -772,6 +825,15 @@ async function waitForTerminalEvent(
   throw new Error("Timed out waiting for ingest event")
 }
 
+async function waitForUpdateReview(service: WikiService) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const session = service.getCurrentUpdate()
+    if (session && session.status === "review") return session
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+  throw new Error("Timed out waiting for wiki update review")
+}
+
 async function temporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "amend-desktop-service-"))
   temporaryDirectories.push(directory)
@@ -783,6 +845,69 @@ function createFakeAgent(): WikiAgent {
     name: "fake/wiki-agent",
     async run() {
       return { summary: "Integrated source" }
+    },
+  }
+}
+
+function createFakeUpdateAgent(): WikiUpdateAgentSession {
+  return {
+    name: "fake/update-agent",
+    async prompt() {
+      return { output: "Updated the page.", summary: "Update page" }
+    },
+    async abort() {},
+    dispose() {},
+  }
+}
+
+function createFakeUpdateProposal(calls: string[]): WikiUpdateProposalSession {
+  return {
+    workspacePath: "/wiki",
+    baseCommit: "initial-commit",
+    agentName: "fake/update-agent",
+    async runTurn({ onEvent }) {
+      onEvent?.({
+        type: "tool-start",
+        callId: "activity_12345678",
+        toolName: "edit",
+        input: { path: "concepts/page.md" },
+      })
+      onEvent?.({ type: "assistant-delta", text: "Updated the page." })
+      onEvent?.({
+        type: "tool-end",
+        callId: "activity_12345678",
+        toolName: "edit",
+        isError: false,
+      })
+      return {
+        summary: "Update page",
+        output: "Updated the page.",
+        changedFiles: [
+          {
+            path: "concepts/page.md",
+            status: "modified",
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+      }
+    },
+    async readDiff() {
+      return "@@ -1 +1 @@"
+    },
+    async apply() {
+      calls.push("apply-update")
+      return {
+        runId: "update_12345678",
+        baseCommit: "initial-commit",
+        commitHash: "update-commit",
+        changedFiles: ["concepts/page.md", "log.md"],
+        summary: "Update page",
+        agent: "fake/update-agent",
+      }
+    },
+    async discard() {
+      calls.push("discard-update")
     },
   }
 }

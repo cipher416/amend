@@ -5,6 +5,7 @@ import {
   isActivateWikiInput,
   isCancelIngestInput,
   isCreateWikiInput,
+  isContinueWikiUpdateInput,
   isIngestDocumentInput,
   isPiCancelLoginInput,
   isPiListModelsInput,
@@ -12,9 +13,12 @@ import {
   isPiSaveApiKeyInput,
   isPiSetDefaultModelInput,
   isReadWikiFileInput,
+  isReadWikiUpdateDiffInput,
+  isStartWikiUpdateInput,
   isStartPiOAuthLoginInput,
   isThemeSource,
   isWikiSearchInput,
+  isWikiUpdateSessionInput,
 } from "./index.ts"
 import {
   isAmendResult,
@@ -32,6 +36,11 @@ import {
   isWikiListItems,
   isWikiSummary,
   isWikiSummaryOrNull,
+  isStartWikiUpdateResult,
+  isWikiUpdateApplyResult,
+  isWikiUpdateChangedEvent,
+  isWikiUpdateFileDiff,
+  isWikiUpdateSession,
 } from "./guards.ts"
 
 describe("desktop contract validation", () => {
@@ -55,6 +64,8 @@ describe("desktop contract validation", () => {
       providerOAuthEvent: "amend:providers:oauth-event",
       listWikiFiles: "amend:wiki:list-files",
       readWikiFile: "amend:wiki:read-file",
+      startWikiUpdate: "amend:wiki:update:start",
+      wikiUpdateChanged: "amend:wiki:update:changed",
     })
   })
 
@@ -75,6 +86,27 @@ describe("desktop contract validation", () => {
     expect(isCancelIngestInput({ jobId: "ingest_12345678" })).toBe(true)
     expect(isActivateWikiInput({ wikiId: "wiki_12345678" })).toBe(true)
     expect(isReadWikiFileInput({ path: "concepts/cache.md" })).toBe(true)
+    expect(
+      isStartWikiUpdateInput({
+        prompt: "Clarify the cache invalidation section.",
+        contextPath: "concepts/cache.md",
+      })
+    ).toBe(true)
+    expect(
+      isContinueWikiUpdateInput({
+        sessionId: "update_12345678",
+        prompt: "Also add an example.",
+      })
+    ).toBe(true)
+    expect(isWikiUpdateSessionInput({ sessionId: "update_12345678" })).toBe(
+      true
+    )
+    expect(
+      isReadWikiUpdateDiffInput({
+        sessionId: "update_12345678",
+        path: "concepts/cache.md",
+      })
+    ).toBe(true)
     expect(isThemeSource("system")).toBe(true)
   })
 
@@ -102,6 +134,13 @@ describe("desktop contract validation", () => {
       })
     ).toBe(false)
     expect(isReadWikiFileInput({ path: "" })).toBe(false)
+    expect(isStartWikiUpdateInput({ prompt: "   " })).toBe(false)
+    expect(
+      isContinueWikiUpdateInput({
+        sessionId: "../escape",
+        prompt: "Continue",
+      })
+    ).toBe(false)
     expect(
       isReadWikiFileInput({ path: "concepts/cache.md", extra: true })
     ).toBe(false)
@@ -286,6 +325,81 @@ describe("desktop contract validation", () => {
     expect(isWikiIngestChangedEvent({ wikiId: 42, job: runningJob })).toBe(
       false
     )
+  })
+
+  it("validates wiki update sessions, events, diffs, and apply results", () => {
+    const session = {
+      id: "update_12345678",
+      wikiId: "wiki_12345678",
+      baseCommit: "abc123",
+      status: "review" as const,
+      revision: 4,
+      updatedAt: "2026-07-22T12:00:00.000Z",
+      cancellable: false,
+      messages: [
+        {
+          id: "message_12345678",
+          role: "user" as const,
+          content: "Clarify cache invalidation.",
+          status: "complete" as const,
+          createdAt: "2026-07-22T11:59:00.000Z",
+        },
+      ],
+      activity: [
+        {
+          id: "activity_12345678",
+          tool: "edit" as const,
+          label: "Edited concepts/cache.md",
+          status: "complete" as const,
+        },
+      ],
+      proposal: {
+        summary: "Clarify cache invalidation",
+        changedFiles: [
+          {
+            path: "concepts/cache.md",
+            status: "modified" as const,
+            additions: 5,
+            deletions: 2,
+          },
+        ],
+      },
+    }
+    expect(isWikiUpdateSession(session)).toBe(true)
+    expect(isWikiUpdateChangedEvent({ wikiId: "wiki_12345678", session })).toBe(
+      true
+    )
+    expect(
+      isWikiUpdateChangedEvent({
+        wikiId: "wiki_12345678",
+        session: { ...session, revision: -1 },
+      })
+    ).toBe(false)
+    expect(
+      isWikiUpdateFileDiff({
+        path: "concepts/cache.md",
+        patch: "@@ -1 +1 @@",
+      })
+    ).toBe(true)
+    expect(isStartWikiUpdateResult({ sessionId: "update_12345678" })).toBe(true)
+    expect(
+      isWikiUpdateApplyResult({
+        runId: "update_12345678",
+        commitHash: "def456",
+        changedFiles: ["concepts/cache.md", "log.md"],
+        summary: "Clarify cache invalidation",
+        index: {
+          status: "ready",
+          summary: {
+            commitHash: "def456",
+            added: 0,
+            updated: 2,
+            removed: 0,
+            unchanged: 3,
+          },
+        },
+      })
+    ).toBe(true)
   })
 })
 

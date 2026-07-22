@@ -1,7 +1,7 @@
 ---
 name: llm-wiki
 description: Maintain an Amend wiki by integrating captured sources into a consistent, interlinked knowledge base.
-version: 2.1.0-amend.1
+version: 2.2.0-amend.1
 license: MIT
 metadata:
   upstream: https://github.com/NousResearch/hermes-agent/blob/d1383a6b1450c6c139720b1b01f8b99cc130453f/skills/research/llm-wiki/SKILL.md
@@ -35,6 +35,28 @@ Follow this sequence for every ingest.
 The ingest is complete only when the source remains unchanged, every material
 claim is traceable to a listed source, all links resolve, every page is indexed,
 and the log accurately reports the changes.
+
+## Update A Wiki
+
+For an interactive update, treat the existing wiki as the source of truth and
+keep the requested scope explicit.
+
+1. Read `SCHEMA.md`, `index.md`, and the pages relevant to the request before
+   editing. Search more broadly when the change affects shared terminology or
+   links.
+2. Answer normally when the request needs no file change. Do not manufacture an
+   edit merely to produce a proposal.
+3. Change only `entities/`, `concepts/`, `comparisons/`, `queries/`, and
+   `index.md`. Never edit `raw/`, `SCHEMA.md`, `.amend/`, Git metadata, or
+   `log.md`; the host application creates the append-only update log entry.
+4. Preserve valid frontmatter, traceable source references, unique slugs,
+   resolvable wikilinks, and a complete alphabetical `index.md`.
+5. After editing, inspect all affected pages together and summarize the final
+   intent of the proposal. Follow-up requests refine the same isolated draft
+   until the human applies or discards it.
+
+The update is complete only when the final wiki is internally consistent and
+the proposed files match the user's latest instructions.
 
 ## File Ownership
 

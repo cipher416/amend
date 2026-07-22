@@ -10,6 +10,7 @@ import {
   isSourceDocumentSelectionOrNull,
   isStartIngestResult,
   isStartPiOAuthLoginResult,
+  isStartWikiUpdateResult,
   isWikiFileContent,
   isWikiFileTreeItems,
   isWikiIndexRefreshSummary,
@@ -17,6 +18,10 @@ import {
   isWikiIngestJobOrNull,
   isWikiSearchResults,
   isWikiTagFacets,
+  isWikiUpdateApplyResult,
+  isWikiUpdateChangedEvent,
+  isWikiUpdateFileDiff,
+  isWikiUpdateSessionOrNull,
   isWikiHomeOrNull,
   isWikiListItems,
   isWikiSummary,
@@ -28,6 +33,7 @@ import type {
   AmendApi,
   AmendResult,
   CancelIngestInput,
+  ContinueWikiUpdateInput,
   CreateWikiInput,
   IngestDocumentInput,
   PiCancelLoginInput,
@@ -37,9 +43,13 @@ import type {
   PiSaveApiKeyInput,
   PiSetDefaultModelInput,
   ReadWikiFileInput,
+  ReadWikiUpdateDiffInput,
+  StartWikiUpdateInput,
   StartPiOAuthLoginInput,
   ThemeSource,
   WikiIngestChangedEvent,
+  WikiUpdateChangedEvent,
+  WikiUpdateSessionInput,
   WikiSearchInput,
   WikiHome,
 } from "@workspace/contract"
@@ -131,6 +141,20 @@ const wiki = Object.freeze({
   listFiles: () => invoke(amendChannels.listWikiFiles, isWikiFileTreeItems),
   readFile: (input: ReadWikiFileInput) =>
     invoke(amendChannels.readWikiFile, isWikiFileContent, input),
+  startUpdate: (input: StartWikiUpdateInput) =>
+    invoke(amendChannels.startWikiUpdate, isStartWikiUpdateResult, input),
+  continueUpdate: (input: ContinueWikiUpdateInput) =>
+    invoke(amendChannels.continueWikiUpdate, isNull, input),
+  currentUpdate: () =>
+    invoke(amendChannels.getCurrentWikiUpdate, isWikiUpdateSessionOrNull),
+  cancelUpdateTurn: (input: WikiUpdateSessionInput) =>
+    invoke(amendChannels.cancelWikiUpdateTurn, isNull, input),
+  readUpdateDiff: (input: ReadWikiUpdateDiffInput) =>
+    invoke(amendChannels.readWikiUpdateDiff, isWikiUpdateFileDiff, input),
+  applyUpdate: (input: WikiUpdateSessionInput) =>
+    invoke(amendChannels.applyWikiUpdate, isWikiUpdateApplyResult, input),
+  discardUpdate: (input: WikiUpdateSessionInput) =>
+    invoke(amendChannels.discardWikiUpdate, isNull, input),
   search: (input: WikiSearchInput) =>
     invoke(amendChannels.searchWiki, isWikiSearchResults, input),
   listTags: () => invoke(amendChannels.listWikiTags, isWikiTagFacets),
@@ -141,6 +165,15 @@ const wiki = Object.freeze({
     ipcRenderer.on(amendChannels.ingestChanged, wrapped)
     return () => {
       ipcRenderer.removeListener(amendChannels.ingestChanged, wrapped)
+    }
+  },
+  onUpdateChanged(listener: (event: WikiUpdateChangedEvent) => void) {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      if (isWikiUpdateChangedEvent(payload)) listener(payload)
+    }
+    ipcRenderer.on(amendChannels.wikiUpdateChanged, wrapped)
+    return () => {
+      ipcRenderer.removeListener(amendChannels.wikiUpdateChanged, wrapped)
     }
   },
 })

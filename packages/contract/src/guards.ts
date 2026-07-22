@@ -10,10 +10,19 @@ import type {
   SourceDocumentSelection,
   StartIngestResult,
   StartPiOAuthLoginResult,
+  StartWikiUpdateResult,
   WikiFileContent,
   WikiFileTreeItem,
   WikiIngestChangedEvent,
   WikiIngestJob,
+  WikiUpdateActivity,
+  WikiUpdateApplyResult,
+  WikiUpdateChangedEvent,
+  WikiUpdateChangedFile,
+  WikiUpdateFileDiff,
+  WikiUpdateMessage,
+  WikiUpdateProposal,
+  WikiUpdateSession,
   WikiIndexRefreshSummary,
   WikiProgressEvent,
   WikiSearchResult,
@@ -38,6 +47,8 @@ const errorCodes = new Set<AmendErrorCode>([
   "pi-configuration-missing",
   "pi-failed",
   "unauthorized",
+  "update-conflict",
+  "update-failed",
   "wiki-creation-failed",
   "wiki-open-failed",
 ])
@@ -268,6 +279,93 @@ export const isWikiFileContent: Guard<WikiFileContent> = (
     ? value.content === undefined
     : isString(value.content))
 
+export const isStartWikiUpdateResult: Guard<StartWikiUpdateResult> = (
+  value
+): value is StartWikiUpdateResult =>
+  isRecord(value) &&
+  hasOnlyKeys(value, ["sessionId"]) &&
+  isJobId(value.sessionId)
+
+export const isWikiUpdateSessionOrNull: Guard<WikiUpdateSession | null> = (
+  value
+): value is WikiUpdateSession | null =>
+  value === null || isWikiUpdateSession(value)
+
+export const isWikiUpdateSession: Guard<WikiUpdateSession> = (
+  value
+): value is WikiUpdateSession =>
+  isRecord(value) &&
+  hasOnlyKeys(value, [
+    "id",
+    "wikiId",
+    "baseCommit",
+    "status",
+    "revision",
+    "updatedAt",
+    "cancellable",
+    "messages",
+    "activity",
+    "proposal",
+    "error",
+    "usage",
+  ]) &&
+  isJobId(value.id) &&
+  isString(value.wikiId) &&
+  isString(value.baseCommit) &&
+  ["running", "review", "applying", "failed"].includes(String(value.status)) &&
+  Number.isInteger(value.revision) &&
+  Number(value.revision) >= 0 &&
+  isString(value.updatedAt) &&
+  typeof value.cancellable === "boolean" &&
+  Array.isArray(value.messages) &&
+  value.messages.every(isWikiUpdateMessage) &&
+  Array.isArray(value.activity) &&
+  value.activity.every(isWikiUpdateActivity) &&
+  (value.proposal === undefined || isWikiUpdateProposal(value.proposal)) &&
+  (value.error === undefined || isAmendError(value.error)) &&
+  (value.usage === undefined || isUsage(value.usage))
+
+export const isWikiUpdateChangedEvent: Guard<WikiUpdateChangedEvent> = (
+  value
+): value is WikiUpdateChangedEvent =>
+  isRecord(value) &&
+  hasOnlyKeys(value, ["wikiId", "session"]) &&
+  isString(value.wikiId) &&
+  (value.session === null || isWikiUpdateSession(value.session))
+
+export const isWikiUpdateFileDiff: Guard<WikiUpdateFileDiff> = (
+  value
+): value is WikiUpdateFileDiff =>
+  isRecord(value) &&
+  hasOnlyKeys(value, ["path", "patch"]) &&
+  isString(value.path) &&
+  isString(value.patch)
+
+export const isWikiUpdateApplyResult: Guard<WikiUpdateApplyResult> = (
+  value
+): value is WikiUpdateApplyResult =>
+  isRecord(value) &&
+  hasOnlyKeys(value, [
+    "runId",
+    "commitHash",
+    "changedFiles",
+    "summary",
+    "usage",
+    "index",
+  ]) &&
+  isJobId(value.runId) &&
+  isString(value.commitHash) &&
+  isStringArray(value.changedFiles) &&
+  isString(value.summary) &&
+  (value.usage === undefined || isUsage(value.usage)) &&
+  isRecord(value.index) &&
+  (value.index.status === "ready"
+    ? hasOnlyKeys(value.index, ["status", "summary"]) &&
+      isWikiIndexRefreshSummary(value.index.summary)
+    : value.index.status === "failed" &&
+      hasOnlyKeys(value.index, ["status", "error"]) &&
+      isAmendError(value.index.error))
+
 export const isPiConnectionStatus: Guard<PiConnectionStatus> = (
   value
 ): value is PiConnectionStatus =>
@@ -385,6 +483,63 @@ function isUsage(value: unknown): boolean {
     isNumber(value.inputTokens) &&
     isNumber(value.outputTokens) &&
     isNumber(value.cost)
+  )
+}
+
+function isWikiUpdateMessage(value: unknown): value is WikiUpdateMessage {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["id", "role", "content", "status", "createdAt"]) &&
+    isJobId(value.id) &&
+    (value.role === "user" || value.role === "assistant") &&
+    isString(value.content) &&
+    (value.status === "streaming" || value.status === "complete") &&
+    isString(value.createdAt)
+  )
+}
+
+function isWikiUpdateActivity(value: unknown): value is WikiUpdateActivity {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["id", "tool", "label", "status"]) &&
+    isJobId(value.id) &&
+    [
+      "read",
+      "grep",
+      "find",
+      "ls",
+      "edit",
+      "write",
+      "validate",
+      "repair",
+    ].includes(String(value.tool)) &&
+    isString(value.label) &&
+    ["running", "complete", "failed"].includes(String(value.status))
+  )
+}
+
+function isWikiUpdateProposal(value: unknown): value is WikiUpdateProposal {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["summary", "changedFiles"]) &&
+    isString(value.summary) &&
+    Array.isArray(value.changedFiles) &&
+    value.changedFiles.every(isWikiUpdateChangedFile)
+  )
+}
+
+function isWikiUpdateChangedFile(
+  value: unknown
+): value is WikiUpdateChangedFile {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["path", "status", "additions", "deletions"]) &&
+    isString(value.path) &&
+    ["added", "modified", "deleted"].includes(String(value.status)) &&
+    Number.isInteger(value.additions) &&
+    Number(value.additions) >= 0 &&
+    Number.isInteger(value.deletions) &&
+    Number(value.deletions) >= 0
   )
 }
 

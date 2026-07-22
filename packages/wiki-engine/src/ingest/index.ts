@@ -9,15 +9,11 @@ import {
   writeFile,
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { basename, dirname, join, posix, resolve } from "node:path"
+import { dirname, join, posix, resolve } from "node:path"
 
-import {
-  isValidSourcePath,
-  parseMarkdownFrontmatter,
-  readWikiPageMetadata,
-  wikiPageDirectories,
-} from "../internal/format.ts"
+import { isValidSourcePath, wikiPageDirectories } from "../internal/format.ts"
 import { git } from "../internal/git.ts"
+import { lintWikiStructure } from "../internal/validation.ts"
 import { validateWikiId } from "../internal/wiki-manifest.ts"
 import { resolveWikiPath } from "../wiki.ts"
 
@@ -463,6 +459,7 @@ async function lintAgentChanges(input: {
   const report = (diagnostic: WikiLintDiagnostic) => {
     diagnostics.push(diagnostic)
   }
+  diagnostics.push(...(await lintWikiStructure(input.worktreePath)))
   const currentRaw = await readFilesUnder(join(input.worktreePath, "raw"))
   for (const [path, content] of input.existingRaw) {
     if (currentRaw.get(path) !== content) {
@@ -525,71 +522,6 @@ async function lintAgentChanges(input: {
     }
   }
 
-  const pages = await readWikiPages(input.worktreePath)
-  if (pages.length === 0) {
-    report({
-      code: "page.missing",
-      message: "The agent must create a wiki page",
-    })
-  }
-  const index = await readFile(
-    join(input.worktreePath, "index.md"),
-    "utf8"
-  ).catch(() => undefined)
-  if (index === undefined) {
-    report({
-      code: "index.missing",
-      path: "index.md",
-      message: "The wiki index is missing",
-    })
-  }
-  const pathsByPageName = new Map<string, string[]>()
-  for (const page of pages) {
-    const pageName = basename(page.path, ".md")
-    const paths = pathsByPageName.get(pageName) ?? []
-    paths.push(page.path)
-    pathsByPageName.set(pageName, paths)
-  }
-  for (const [pageName, paths] of pathsByPageName) {
-    if (paths.length > 1) {
-      report({
-        code: "page.duplicate-slug",
-        message: `Page slug ${pageName} is duplicated by ${paths.join(", ")}`,
-      })
-    }
-  }
-  const pageNames = new Set(pathsByPageName.keys())
-
-  for (const page of pages) {
-    diagnostics.push(
-      ...(await lintPageFrontmatter(
-        page.path,
-        page.content,
-        input.worktreePath
-      ))
-    )
-    const pageName = basename(page.path, ".md")
-    if (index !== undefined && !index.includes(`[[${pageName}]]`)) {
-      report({
-        code: "index.missing-page",
-        path: "index.md",
-        message: `The index is missing wiki page ${pageName}`,
-      })
-    }
-    for (const link of page.content.matchAll(
-      /\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g
-    )) {
-      const target = link[1].trim()
-      if (target && !pageNames.has(target)) {
-        report({
-          code: "wikilink.broken",
-          path: page.path,
-          message: `Wikilink target does not exist: ${target}`,
-        })
-      }
-    }
-  }
-
   const changedPaths = await changedPathsInWorktree(input.worktreePath)
   if (
     !changedPaths.some((path) =>
@@ -617,49 +549,13 @@ async function lintAgentChanges(input: {
     }
   }
 
-  return diagnostics
-}
-
-async function lintPageFrontmatter(
-  pagePath: string,
-  content: string,
-  worktreePath: string
-): Promise<WikiLintDiagnostic[]> {
-  const diagnostics: WikiLintDiagnostic[] = []
-  let frontmatter: Map<string, unknown>
-  try {
-    frontmatter = parseMarkdownFrontmatter(content, pagePath).frontmatter
-  } catch (error) {
-    diagnostics.push({
-      code: "frontmatter.invalid",
-      path: pagePath,
-      message: error instanceof Error ? error.message : "Invalid frontmatter",
-    })
-    return diagnostics
-  }
-  const metadata = readWikiPageMetadata(frontmatter, pagePath)
-  diagnostics.push(
-    ...metadata.diagnostics.map((diagnostic) => ({
-      ...diagnostic,
-      path: pagePath,
-    }))
-  )
-  for (const sourcePath of metadata.sourcePaths) {
-    const exists = await readFile(
-      join(worktreePath, ...sourcePath.split("/")),
-      "utf8"
-    )
-      .then(() => true)
-      .catch(() => false)
-    if (!exists) {
-      diagnostics.push({
-        code: "frontmatter.missing-source",
-        path: pagePath,
-        message: `Cited raw source does not exist: ${sourcePath}`,
-      })
-    }
-  }
-  return diagnostics
+  const seen = new Set<string>()
+  return diagnostics.filter((diagnostic) => {
+    const key = `${diagnostic.code}\0${diagnostic.path ?? ""}\0${diagnostic.message}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 async function validateManagedPaths(
@@ -691,20 +587,6 @@ async function changedPathsInWorktree(worktreePath: string): Promise<string[]> {
     "--exclude-standard"
   )
   return [...tracked.split("\n"), ...untracked.split("\n")].filter(Boolean)
-}
-
-async function readWikiPages(
-  worktreePath: string
-): Promise<Array<{ path: string; content: string }>> {
-  const pages: Array<{ path: string; content: string }> = []
-  for (const directory of pageDirectories) {
-    const files = await readFilesUnder(join(worktreePath, directory))
-    for (const [path, content] of files) {
-      if (path.endsWith(".md"))
-        pages.push({ path: `${directory}/${path}`, content })
-    }
-  }
-  return pages
 }
 
 async function readFilesUnder(rootPath: string): Promise<Map<string, string>> {

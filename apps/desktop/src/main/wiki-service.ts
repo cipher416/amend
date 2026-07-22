@@ -7,12 +7,16 @@ import type {
   AmendError,
   AmendErrorCode,
   CancelIngestInput,
+  ContinueWikiUpdateInput,
   CreateWikiInput,
   IngestDocumentInput,
   IngestPastedSourceResult,
   ReadWikiFileInput,
+  ReadWikiUpdateDiffInput,
   SourceDocumentSelection,
   StartIngestResult,
+  StartWikiUpdateInput,
+  StartWikiUpdateResult,
   WikiFileContent,
   WikiFileTreeItem,
   WikiIngestChangedEvent,
@@ -24,6 +28,12 @@ import type {
   WikiTagFacet,
   WikiListItem,
   WikiSummary,
+  WikiUpdateActivity,
+  WikiUpdateApplyResult,
+  WikiUpdateChangedEvent,
+  WikiUpdateMessage,
+  WikiUpdateSession,
+  WikiUpdateSessionInput,
 } from "@workspace/contract"
 import type {
   PiProgressEvent,
@@ -33,6 +43,17 @@ import { openWikiIndex, WikiIndexError } from "@workspace/wiki-engine/index"
 import type { WikiIndex } from "@workspace/wiki-engine/index"
 import { createWikiEngine } from "@workspace/wiki-engine/ingest"
 import type { WikiAgent, WikiEngine } from "@workspace/wiki-engine/ingest"
+import {
+  createWikiUpdateProposalSession,
+  WikiUpdateAgentError,
+  WikiUpdateConflictError,
+  WikiUpdateValidationError,
+} from "@workspace/wiki-engine/update"
+import type {
+  WikiUpdateAgentEvent,
+  WikiUpdateAgentSession,
+  WikiUpdateProposalSession,
+} from "@workspace/wiki-engine/update"
 import { readWiki } from "@workspace/wiki-engine/wiki"
 import type { Wiki } from "@workspace/wiki-engine/wiki"
 
@@ -58,6 +79,13 @@ interface RunningIngest {
   controller: AbortController
 }
 
+interface ActiveUpdate {
+  snapshot: WikiUpdateSession
+  proposal: WikiUpdateProposalSession
+  controller?: AbortController
+  emitTimer?: NodeJS.Timeout
+}
+
 interface WikiServiceOptions {
   userDataPath: string
   skillPath: string
@@ -67,6 +95,13 @@ interface WikiServiceOptions {
     onProgress: (event: PiProgressEvent) => void
   ) => Promise<WikiAgent>
   createEngine?: (agent: WikiAgent) => WikiEngine
+  createUpdateAgent?: () => Promise<WikiUpdateAgentSession>
+  createUpdateProposal?: (options: {
+    workspacePath: string
+    agent: WikiUpdateAgentSession
+    createRunId: () => string
+    now: () => Date
+  }) => Promise<WikiUpdateProposalSession>
   openIndex?: (options: {
     workspacePath: string
     databasePath: string
@@ -95,9 +130,14 @@ export class WikiService {
   private readonly jobListeners = new Set<
     (event: WikiIngestChangedEvent) => void
   >()
+  private readonly updates = new Map<string, ActiveUpdate>()
+  private readonly updateListeners = new Set<
+    (event: WikiUpdateChangedEvent) => void
+  >()
   private active: ActiveWiki | undefined
   private lifecycleOperation: Promise<unknown> | undefined
   private modelOperation: Promise<unknown> | undefined
+  private modelOperationStarting = false
   private runningIngest: RunningIngest | undefined
   private disposed = false
 
@@ -113,6 +153,13 @@ export class WikiService {
   ): () => void {
     this.jobListeners.add(listener)
     return () => this.jobListeners.delete(listener)
+  }
+
+  subscribeUpdateChanged(
+    listener: (event: WikiUpdateChangedEvent) => void
+  ): () => void {
+    this.updateListeners.add(listener)
+    return () => this.updateListeners.delete(listener)
   }
 
   async setWikiHome(parentPath: string): Promise<void> {
@@ -222,7 +269,10 @@ export class WikiService {
       name: basename(wiki.path),
       displayPath: wiki.path,
       active: this.active?.summary.id === wiki.id,
-      running: this.jobs.get(wiki.id)?.status === "running",
+      running:
+        this.jobs.get(wiki.id)?.status === "running" ||
+        this.updates.get(wiki.id)?.snapshot.status === "running" ||
+        false,
     }))
   }
 
@@ -313,7 +363,7 @@ export class WikiService {
   ): Promise<StartIngestResult> {
     this.assertOpen()
     const active = this.requireActive()
-    if (this.modelOperation) {
+    if (this.modelOperation || this.modelOperationStarting) {
       throw new WikiServiceError("busy", "Amend is already working.")
     }
     const document = this.documents.get(input.documentToken)
@@ -398,6 +448,235 @@ export class WikiService {
     this.runningIngest.controller.abort(
       new DOMException("The ingest was cancelled", "AbortError")
     )
+  }
+
+  getCurrentUpdate(): WikiUpdateSession | null {
+    this.assertOpen()
+    const active = this.requireActive()
+    return this.updates.get(active.summary.id)?.snapshot ?? null
+  }
+
+  async startUpdate(
+    input: StartWikiUpdateInput
+  ): Promise<StartWikiUpdateResult> {
+    this.assertOpen()
+    const active = this.requireActive()
+    if (this.updates.has(active.summary.id)) {
+      throw new WikiServiceError(
+        "busy",
+        "This wiki already has an update session."
+      )
+    }
+    if (this.modelOperation || this.modelOperationStarting) {
+      throw new WikiServiceError("busy", "Amend is already working.")
+    }
+    this.modelOperationStarting = true
+    let agent: WikiUpdateAgentSession | undefined
+    const setupOperation = Promise.resolve().then(async () => {
+      agent = await this.createUpdateAgent()
+      return await (
+        this.options.createUpdateProposal ?? createWikiUpdateProposalSession
+      )({
+        workspacePath: active.workspacePath,
+        agent,
+        createRunId: this.createId,
+        now: this.now,
+      })
+    })
+    this.modelOperation = setupOperation
+    let proposal: WikiUpdateProposalSession
+    try {
+      proposal = await setupOperation
+    } catch (error) {
+      agent?.dispose()
+      throw updateServiceError(error)
+    } finally {
+      if (this.modelOperation === setupOperation) {
+        this.modelOperation = undefined
+      }
+      this.modelOperationStarting = false
+    }
+    if (this.disposed) {
+      await proposal.discard().catch(() => undefined)
+      throw new WikiServiceError("cancelled", "Amend is shutting down.")
+    }
+    const sessionId = this.nextUpdateId()
+    const timestamp = this.now().toISOString()
+    this.updates.set(active.summary.id, {
+      proposal,
+      snapshot: {
+        id: sessionId,
+        wikiId: active.summary.id,
+        baseCommit: proposal.baseCommit,
+        status: "running",
+        revision: 0,
+        updatedAt: timestamp,
+        cancellable: true,
+        messages: [updateMessage("user", input.prompt, timestamp)],
+        activity: [],
+      },
+    })
+    this.emitUpdate(active.summary.id)
+    this.startUpdateTurn(active.summary.id, input.prompt, input.contextPath)
+    return { sessionId }
+  }
+
+  continueUpdate(input: ContinueWikiUpdateInput): void {
+    this.assertOpen()
+    const active = this.requireUpdate(input.sessionId)
+    if (active.snapshot.status === "running") {
+      throw new WikiServiceError("busy", "The update is still running.")
+    }
+    if (
+      active.snapshot.status === "applying" ||
+      this.modelOperation ||
+      this.modelOperationStarting
+    ) {
+      throw new WikiServiceError("busy", "Amend is already working.")
+    }
+    const timestamp = this.now().toISOString()
+    active.snapshot = {
+      ...active.snapshot,
+      status: "running",
+      revision: active.snapshot.revision + 1,
+      updatedAt: timestamp,
+      cancellable: true,
+      messages: [
+        ...active.snapshot.messages,
+        updateMessage("user", input.prompt, timestamp),
+      ],
+      activity: [],
+      error: undefined,
+    }
+    this.emitUpdate(active.snapshot.wikiId)
+    this.startUpdateTurn(active.snapshot.wikiId, input.prompt)
+  }
+
+  cancelUpdateTurn(input: WikiUpdateSessionInput): void {
+    this.assertOpen()
+    const update = this.requireUpdate(input.sessionId)
+    if (update.snapshot.status !== "running" || !update.controller) return
+    update.controller.abort(
+      new DOMException("The wiki update was cancelled", "AbortError")
+    )
+  }
+
+  async readUpdateDiff(
+    input: ReadWikiUpdateDiffInput
+  ): Promise<{ path: string; patch: string }> {
+    this.assertOpen()
+    const update = this.requireUpdate(input.sessionId)
+    try {
+      return {
+        path: input.path,
+        patch: await update.proposal.readDiff(input.path),
+      }
+    } catch (error) {
+      throw updateServiceError(error)
+    }
+  }
+
+  async applyUpdate(
+    input: WikiUpdateSessionInput
+  ): Promise<WikiUpdateApplyResult> {
+    this.assertOpen()
+    const update = this.requireUpdate(input.sessionId)
+    if (update.snapshot.status !== "review" || !update.snapshot.proposal) {
+      throw new WikiServiceError(
+        "invalid-input",
+        "The update has no reviewed changes to apply."
+      )
+    }
+    if (this.modelOperation || this.modelOperationStarting) {
+      throw new WikiServiceError("busy", "Amend is already working.")
+    }
+    const workspaceId = update.snapshot.wikiId
+    update.snapshot = {
+      ...update.snapshot,
+      status: "applying",
+      revision: update.snapshot.revision + 1,
+      updatedAt: this.now().toISOString(),
+      cancellable: false,
+      error: undefined,
+    }
+    this.emitUpdate(workspaceId)
+    const operation = update.proposal.apply()
+    this.modelOperation = operation
+    try {
+      const commit = await operation
+      const context = this.contexts.get(workspaceId)
+      const index: WikiUpdateApplyResult["index"] = context
+        ? await context.index.refresh().then(
+            (summary) => ({ status: "ready" as const, summary }),
+            () => ({
+              status: "failed" as const,
+              error: {
+                code: "index-failed" as const,
+                message:
+                  "The update was saved, but the search index could not be refreshed.",
+              },
+            })
+          )
+        : {
+            status: "failed",
+            error: {
+              code: "index-failed",
+              message:
+                "The update was saved, but the wiki is no longer open for indexing.",
+            },
+          }
+      if (context) {
+        const nextContext: ActiveWiki = {
+          ...context,
+          summary: { ...context.summary, commitHash: commit.commitHash },
+        }
+        this.contexts.set(workspaceId, nextContext)
+        if (this.active?.summary.id === workspaceId) this.active = nextContext
+      }
+      const result: WikiUpdateApplyResult = {
+        runId: commit.runId,
+        commitHash: commit.commitHash,
+        changedFiles: commit.changedFiles,
+        summary: commit.summary,
+        ...(update.snapshot.usage ? { usage: update.snapshot.usage } : {}),
+        index,
+      }
+      this.updates.delete(workspaceId)
+      this.emitUpdate(workspaceId, null)
+      return result
+    } catch (error) {
+      update.snapshot = {
+        ...update.snapshot,
+        status: "review",
+        revision: update.snapshot.revision + 1,
+        updatedAt: this.now().toISOString(),
+        cancellable: false,
+        error: toUpdateError(error),
+      }
+      this.emitUpdate(workspaceId)
+      throw updateServiceError(error)
+    } finally {
+      if (this.modelOperation === operation) this.modelOperation = undefined
+    }
+  }
+
+  async discardUpdate(input: WikiUpdateSessionInput): Promise<void> {
+    this.assertOpen()
+    const update = this.requireUpdate(input.sessionId)
+    if (
+      update.snapshot.status === "running" ||
+      update.snapshot.status === "applying"
+    ) {
+      throw new WikiServiceError(
+        "busy",
+        "Cancel the current update operation before discarding it."
+      )
+    }
+    await update.proposal.discard().catch((error: unknown) => {
+      throw updateServiceError(error)
+    })
+    this.updates.delete(update.snapshot.wikiId)
+    this.emitUpdate(update.snapshot.wikiId, null)
   }
 
   async search(input: WikiSearchInput): Promise<readonly WikiSearchResult[]> {
@@ -485,7 +764,7 @@ export class WikiService {
 
   async refreshIndex(): Promise<WikiIndexRefreshSummary> {
     this.assertOpen()
-    if (this.modelOperation) {
+    if (this.modelOperation || this.modelOperationStarting) {
       throw new WikiServiceError("busy", "Amend is already working.")
     }
     const active = this.requireActive()
@@ -533,10 +812,21 @@ export class WikiService {
         new DOMException("The ingest was cancelled", "AbortError")
       )
     }
+    for (const update of this.updates.values()) {
+      if (update.emitTimer) clearTimeout(update.emitTimer)
+      update.controller?.abort(
+        new DOMException("Amend is shutting down", "AbortError")
+      )
+    }
     await Promise.all([
       this.lifecycleOperation?.catch(() => undefined),
       this.modelOperation?.catch(() => undefined),
     ])
+    await Promise.all(
+      [...this.updates.values()].map(async (update) => {
+        await update.proposal.discard().catch(() => undefined)
+      })
+    )
     await Promise.all(
       [...this.contexts.values()].map(({ index }) =>
         index.close().catch((error: unknown) => {
@@ -547,8 +837,10 @@ export class WikiService {
     this.active = undefined
     this.contexts.clear()
     this.jobs.clear()
+    this.updates.clear()
     this.documents.clear()
     this.jobListeners.clear()
+    this.updateListeners.clear()
   }
 
   private async initializeWiki(
@@ -871,6 +1163,251 @@ export class WikiService {
     })
   }
 
+  private async createUpdateAgent(): Promise<WikiUpdateAgentSession> {
+    if (this.options.createUpdateAgent) {
+      return await this.options.createUpdateAgent()
+    }
+    let settings: PiAgentSettings
+    const { createPiWikiUpdateAgentSession, readPiAgentSettings } =
+      await import("@workspace/wiki-engine/agent/pi")
+    try {
+      settings = await readPiAgentSettings()
+    } catch (error) {
+      throw new WikiServiceError(
+        "pi-configuration-missing",
+        "Configure a default Pi provider and model before updating the wiki.",
+        { cause: error }
+      )
+    }
+    return createPiWikiUpdateAgentSession({
+      ...settings,
+      skillPath: this.options.skillPath,
+    })
+  }
+
+  private startUpdateTurn(
+    workspaceId: string,
+    prompt: string,
+    contextPath?: string
+  ): void {
+    const update = this.updates.get(workspaceId)
+    if (!update) return
+    const controller = new AbortController()
+    update.controller = controller
+    const assistant = updateMessage("assistant", "", this.now().toISOString())
+    assistant.status = "streaming"
+    update.snapshot = {
+      ...update.snapshot,
+      messages: [...update.snapshot.messages, assistant],
+    }
+    const operation = update.proposal.runTurn({
+      prompt,
+      contextPath,
+      signal: controller.signal,
+      onEvent: (event) =>
+        this.projectUpdateAgentEvent(workspaceId, assistant.id, event),
+    })
+    this.modelOperation = operation
+    void operation
+      .then(
+        (result) => {
+          const current = this.updates.get(workspaceId)
+          if (!current || current.snapshot.id !== update.snapshot.id) return
+          const messages = current.snapshot.messages.map((message) =>
+            message.id === assistant.id
+              ? {
+                  ...message,
+                  content: message.content || result.output,
+                  status: "complete" as const,
+                }
+              : message
+          )
+          current.snapshot = {
+            ...current.snapshot,
+            status: "review",
+            revision: current.snapshot.revision + 1,
+            updatedAt: this.now().toISOString(),
+            cancellable: false,
+            messages,
+            proposal:
+              result.changedFiles.length > 0
+                ? {
+                    summary: result.summary,
+                    changedFiles: result.changedFiles,
+                  }
+                : undefined,
+            error: undefined,
+            ...(result.usage ? { usage: result.usage } : {}),
+          }
+          this.flushUpdateEvent(workspaceId)
+        },
+        (error: unknown) => {
+          const current = this.updates.get(workspaceId)
+          if (!current || current.snapshot.id !== update.snapshot.id) return
+          const amendError = toUpdateError(error)
+          const messages = current.snapshot.messages.map((message) =>
+            message.id === assistant.id
+              ? { ...message, status: "complete" as const }
+              : message
+          )
+          current.snapshot = {
+            ...current.snapshot,
+            status: current.snapshot.proposal ? "review" : "failed",
+            revision: current.snapshot.revision + 1,
+            updatedAt: this.now().toISOString(),
+            cancellable: false,
+            messages,
+            error: amendError,
+          }
+          this.flushUpdateEvent(workspaceId)
+        }
+      )
+      .finally(() => {
+        const current = this.updates.get(workspaceId)
+        if (current?.snapshot.id === update.snapshot.id) {
+          current.controller = undefined
+        }
+        if (this.modelOperation === operation) this.modelOperation = undefined
+      })
+  }
+
+  private projectUpdateAgentEvent(
+    workspaceId: string,
+    assistantMessageId: string,
+    event: WikiUpdateAgentEvent
+  ) {
+    const update = this.updates.get(workspaceId)
+    if (!update || update.snapshot.status !== "running") return
+    if (event.type === "assistant-delta") {
+      update.snapshot = {
+        ...update.snapshot,
+        revision: update.snapshot.revision + 1,
+        updatedAt: this.now().toISOString(),
+        messages: update.snapshot.messages.map((message) =>
+          message.id === assistantMessageId
+            ? { ...message, content: `${message.content}${event.text}` }
+            : message
+        ),
+      }
+      this.scheduleUpdateEvent(workspaceId)
+      return
+    }
+    if (event.type === "repair") {
+      const activity = updateActivity(
+        `activity_${randomUUID().replaceAll("-", "")}`,
+        "repair",
+        "Repairing wiki validation issues",
+        "running"
+      )
+      update.snapshot = appendUpdateActivity(
+        update.snapshot,
+        activity,
+        this.now()
+      )
+      this.emitUpdate(workspaceId)
+      return
+    }
+    if (event.type === "validation") {
+      const existing = update.snapshot.activity.find(
+        ({ id }) => id === "update_validation"
+      )
+      const activity = updateActivity(
+        "update_validation",
+        "validate",
+        "Validated wiki changes",
+        event.status
+      )
+      update.snapshot = existing
+        ? {
+            ...update.snapshot,
+            revision: update.snapshot.revision + 1,
+            updatedAt: this.now().toISOString(),
+            activity: update.snapshot.activity.map((item) =>
+              item.id === activity.id ? activity : item
+            ),
+          }
+        : appendUpdateActivity(update.snapshot, activity, this.now())
+      this.emitUpdate(workspaceId)
+      return
+    }
+    if (event.type === "tool-start") {
+      const tool = updateToolName(event.toolName)
+      const activity = updateActivity(
+        event.callId,
+        tool,
+        updateToolLabel(tool, event.input),
+        "running"
+      )
+      update.snapshot = appendUpdateActivity(
+        update.snapshot,
+        activity,
+        this.now()
+      )
+      this.emitUpdate(workspaceId)
+      return
+    }
+    update.snapshot = {
+      ...update.snapshot,
+      revision: update.snapshot.revision + 1,
+      updatedAt: this.now().toISOString(),
+      activity: update.snapshot.activity.map((activity) =>
+        activity.id === event.callId
+          ? {
+              ...activity,
+              status: event.isError ? "failed" : "complete",
+            }
+          : activity
+      ),
+    }
+    this.emitUpdate(workspaceId)
+  }
+
+  private scheduleUpdateEvent(workspaceId: string) {
+    const update = this.updates.get(workspaceId)
+    if (!update || update.emitTimer) return
+    update.emitTimer = setTimeout(() => {
+      update.emitTimer = undefined
+      this.emitUpdate(workspaceId)
+    }, 50)
+    update.emitTimer.unref()
+  }
+
+  private flushUpdateEvent(workspaceId: string) {
+    const update = this.updates.get(workspaceId)
+    if (update?.emitTimer) {
+      clearTimeout(update.emitTimer)
+      update.emitTimer = undefined
+    }
+    this.emitUpdate(workspaceId)
+  }
+
+  private requireUpdate(sessionId: string): ActiveUpdate {
+    const update = [...this.updates.values()].find(
+      ({ snapshot }) => snapshot.id === sessionId
+    )
+    if (!update) {
+      throw new WikiServiceError(
+        "invalid-input",
+        "The wiki update session was not found."
+      )
+    }
+    return update
+  }
+
+  private emitUpdate(workspaceId: string, session?: WikiUpdateSession | null) {
+    const payload =
+      session === undefined
+        ? (this.updates.get(workspaceId)?.snapshot ?? null)
+        : session
+    for (const listener of this.updateListeners) {
+      try {
+        listener({ wikiId: workspaceId, session: payload })
+      } catch {
+        // Renderer delivery must not affect the main-owned update session.
+      }
+    }
+  }
+
   private createEngine(agent: WikiAgent): WikiEngine {
     return this.options.createEngine?.(agent) ?? createWikiEngine({ agent })
   }
@@ -973,6 +1510,132 @@ export class WikiService {
       ? jobIdFrom(randomUUID())
       : candidate
   }
+
+  private nextUpdateId(): string {
+    const candidate = `update_${this.createId().replace(/[^a-zA-Z0-9_-]/g, "")}`
+    return [...this.updates.values()].some(
+      ({ snapshot }) => snapshot.id === candidate
+    )
+      ? `update_${randomUUID().replaceAll("-", "")}`
+      : candidate
+  }
+}
+
+function updateMessage(
+  role: WikiUpdateMessage["role"],
+  content: string,
+  createdAt: string
+): WikiUpdateMessage {
+  return {
+    id: `message_${randomUUID().replaceAll("-", "")}`,
+    role,
+    content,
+    status: "complete",
+    createdAt,
+  }
+}
+
+function updateActivity(
+  id: string,
+  tool: WikiUpdateActivity["tool"],
+  label: string,
+  status: WikiUpdateActivity["status"]
+): WikiUpdateActivity {
+  return {
+    id: id.length >= 8 ? id.replace(/[^a-zA-Z0-9_-]/g, "_") : `activity_${id}`,
+    tool,
+    label,
+    status,
+  }
+}
+
+function appendUpdateActivity(
+  snapshot: WikiUpdateSession,
+  activity: WikiUpdateActivity,
+  now: Date
+): WikiUpdateSession {
+  return {
+    ...snapshot,
+    revision: snapshot.revision + 1,
+    updatedAt: now.toISOString(),
+    activity: [...snapshot.activity.slice(-49), activity],
+  }
+}
+
+function updateToolName(value: string): WikiUpdateActivity["tool"] {
+  return ["read", "grep", "find", "ls", "edit", "write"].includes(value)
+    ? (value as WikiUpdateActivity["tool"])
+    : "read"
+}
+
+function updateToolLabel(
+  tool: WikiUpdateActivity["tool"],
+  input: unknown
+): string {
+  const record =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>)
+      : {}
+  const path =
+    typeof record.path === "string" && record.path.trim()
+      ? conciseActivityValue(record.path, ".")
+      : "."
+  switch (tool) {
+    case "read":
+      return `Read ${path}`
+    case "edit":
+      return `Edited ${path}`
+    case "write":
+      return `Wrote ${path}`
+    case "grep":
+      return `Searched for ${conciseActivityValue(record.pattern, "text")} in ${path}`
+    case "find":
+      return `Found ${conciseActivityValue(record.pattern, "files")} in ${path}`
+    case "ls":
+      return `Listed ${path}`
+    case "validate":
+      return "Validated wiki changes"
+    case "repair":
+      return "Repaired wiki validation issues"
+  }
+}
+
+function conciseActivityValue(value: unknown, fallback: string): string {
+  const text = typeof value === "string" ? value : fallback
+  const normalized = text.replace(/\s+/g, " ").trim() || fallback
+  return normalized.length <= 80 ? normalized : `${normalized.slice(0, 77)}...`
+}
+
+function toUpdateError(error: unknown): AmendError {
+  if (error instanceof WikiServiceError) {
+    return { code: error.code, message: error.message }
+  }
+  if (error instanceof WikiUpdateConflictError) {
+    return { code: "update-conflict", message: error.message }
+  }
+  if (error instanceof WikiUpdateAgentError) {
+    return { code: "pi-failed", message: error.message }
+  }
+  if (isAbortError(error)) {
+    return { code: "cancelled", message: "The wiki update was cancelled." }
+  }
+  if (error instanceof WikiUpdateValidationError) {
+    return {
+      code: "update-failed",
+      message: error.message,
+    }
+  }
+  return {
+    code: "update-failed",
+    message: error instanceof Error ? error.message : "The wiki update failed.",
+  }
+}
+
+function updateServiceError(error: unknown): WikiServiceError {
+  const amendError = toUpdateError(error)
+  return new WikiServiceError(amendError.code, amendError.message, {
+    cause: error,
+  })
 }
 
 const hiddenWorkspaceEntries = new Set([".amend", ".git"])

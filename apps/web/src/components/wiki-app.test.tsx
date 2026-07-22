@@ -13,6 +13,7 @@ import type {
   WikiFileTreeItem,
   WikiSearchResult,
   WikiSummary,
+  WikiUpdateSession,
 } from "@workspace/contract"
 import { useState } from "react"
 import type { ButtonHTMLAttributes, ReactNode } from "react"
@@ -257,6 +258,80 @@ describe("wiki app", () => {
       path: "concepts/write-ahead-logging.md",
     })
     expect(api.wiki.readFile).toHaveBeenCalledWith({ path: "paper.pdf" })
+  })
+
+  it("starts an update session with the current page as context", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWikiApp(api, {
+      initialWikiId: wikiSummary.id,
+      initialFilePath: "concepts/write-ahead-logging.md",
+    })
+
+    await screen.findByRole("heading", { name: "Write-ahead logging" })
+    await user.click(screen.getByRole("button", { name: "Update" }))
+    await user.type(
+      screen.getByRole("textbox", { name: "Update instructions" }),
+      "Clarify the recovery tradeoffs"
+    )
+    await user.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() =>
+      expect(api.wiki.startUpdate).toHaveBeenCalledWith({
+        prompt: "Clarify the recovery tradeoffs",
+        contextPath: "concepts/write-ahead-logging.md",
+      })
+    )
+  })
+
+  it("reviews a proposal lazily and applies it with completion feedback", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi({ update: reviewUpdateSession })
+    window.amend = api
+
+    renderWikiApp(api, {
+      initialWikiId: wikiSummary.id,
+      initialFilePath: "concepts/write-ahead-logging.md",
+    })
+
+    await screen.findByRole("heading", { name: "Write-ahead logging" })
+    await user.click(screen.getByRole("button", { name: "Update" }))
+
+    await screen.findByText("Clarified recovery ordering.")
+    await screen.findByText("concepts/write-ahead-logging.md")
+    await waitFor(() => expect(api.wiki.readUpdateDiff).toHaveBeenCalled())
+    await user.click(screen.getByRole("button", { name: "Apply" }))
+
+    await waitFor(() =>
+      expect(api.wiki.applyUpdate).toHaveBeenCalledWith({
+        sessionId: reviewUpdateSession.id,
+      })
+    )
+    await screen.findByText("Updated wiki")
+    expect(screen.queryByRole("heading", { name: "Update wiki" })).toBeNull()
+  })
+
+  it("lets users discard a no-change answer while Apply stays disabled", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi({
+      update: { ...reviewUpdateSession, proposal: undefined },
+    })
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await screen.findByRole("heading", { name: "Reliability Wiki" })
+    await user.click(screen.getByRole("button", { name: "Update" }))
+    await screen.findByText("No file changes")
+    expect(
+      screen.getByRole("button", { name: "Apply" }).hasAttribute("disabled")
+    ).toBe(true)
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    expect(api.wiki.discardUpdate).toHaveBeenCalledWith({
+      sessionId: reviewUpdateSession.id,
+    })
   })
 
   it("adds a table of contents for Markdown sections", async () => {
@@ -682,9 +757,11 @@ type MockAmendApi = AmendApi & {
 function createDesktopApi({
   activeWikiRunning = false,
   searchResults = [],
+  update = null,
 }: {
   activeWikiRunning?: boolean
   searchResults?: readonly WikiSearchResult[]
+  update?: WikiUpdateSession | null
 } = {}): MockAmendApi {
   const ingestListeners = new Set<(event: WikiIngestChangedEvent) => void>()
   const api: MockAmendApi = {
@@ -811,10 +888,37 @@ function createDesktopApi({
       }),
       search: vi.fn(async () => success(searchResults)),
       listTags: vi.fn(async () => success([])),
+      startUpdate: vi.fn(async () => success({ sessionId: "update_12345678" })),
+      continueUpdate: vi.fn(async () => success(null)),
+      currentUpdate: vi.fn(async () => success(update)),
+      cancelUpdateTurn: vi.fn(async () => success(null)),
+      readUpdateDiff: vi.fn(async ({ path }) =>
+        success({ path, patch: "@@ -1 +1 @@\n-old\n+new" })
+      ),
+      applyUpdate: vi.fn(async () =>
+        success({
+          runId: "update_12345678",
+          commitHash: "update-commit",
+          changedFiles: [],
+          summary: "Updated wiki",
+          index: {
+            status: "ready" as const,
+            summary: {
+              commitHash: "update-commit",
+              added: 0,
+              updated: 0,
+              removed: 0,
+              unchanged: 0,
+            },
+          },
+        })
+      ),
+      discardUpdate: vi.fn(async () => success(null)),
       onIngestChanged: vi.fn((listener) => {
         ingestListeners.add(listener)
         return () => ingestListeners.delete(listener)
       }),
+      onUpdateChanged: vi.fn(() => () => undefined),
     },
     emitIngestChanged: (event) => {
       for (const listener of ingestListeners) listener(event)
@@ -839,6 +943,44 @@ const archiveWikiSummary: WikiSummary = {
   displayPath: "/research/Archive Wiki",
   commitHash: "commit",
   setupStatus: "ready",
+}
+
+const reviewUpdateSession: WikiUpdateSession = {
+  id: "update_12345678",
+  wikiId: wikiSummary.id,
+  baseCommit: "commit",
+  status: "review",
+  revision: 4,
+  updatedAt: "2026-07-22T12:00:00.000Z",
+  cancellable: false,
+  messages: [
+    {
+      id: "message_12345678",
+      role: "user",
+      content: "Clarify recovery ordering.",
+      status: "complete",
+      createdAt: "2026-07-22T11:59:00.000Z",
+    },
+    {
+      id: "message_87654321",
+      role: "assistant",
+      content: "Clarified recovery ordering.",
+      status: "complete",
+      createdAt: "2026-07-22T12:00:00.000Z",
+    },
+  ],
+  activity: [],
+  proposal: {
+    summary: "Clarified recovery ordering",
+    changedFiles: [
+      {
+        path: "concepts/write-ahead-logging.md",
+        status: "modified",
+        additions: 1,
+        deletions: 1,
+      },
+    ],
+  },
 }
 
 const completedIngestJob: WikiIngestJob = {

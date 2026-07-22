@@ -658,10 +658,35 @@ function createDesktopApi(
         ])
       ),
       listTags: vi.fn(async () => success([{ tag: "storage", count: 1 }])),
+      startUpdate: vi.fn(async () => success({ sessionId: "update_12345678" })),
+      continueUpdate: vi.fn(async () => success(null)),
+      currentUpdate: vi.fn(async () => success(null)),
+      cancelUpdateTurn: vi.fn(async () => success(null)),
+      readUpdateDiff: vi.fn(async ({ path }) => success({ path, patch: "" })),
+      applyUpdate: vi.fn(async () =>
+        success({
+          runId: "update_12345678",
+          commitHash: "update-commit",
+          changedFiles: [],
+          summary: "Updated wiki",
+          index: {
+            status: "ready" as const,
+            summary: {
+              commitHash: "update-commit",
+              added: 0,
+              updated: 0,
+              removed: 0,
+              unchanged: 0,
+            },
+          },
+        })
+      ),
+      discardUpdate: vi.fn(async () => success(null)),
       onIngestChanged: vi.fn((listener) => {
         listeners.add(listener)
         return () => listeners.delete(listener)
       }),
+      onUpdateChanged: vi.fn(() => () => undefined),
     },
     emitOAuthEvent: (event) => {
       for (const listener of piListeners) listener(event)

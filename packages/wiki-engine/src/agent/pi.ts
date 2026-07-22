@@ -32,6 +32,11 @@ import type {
   WikiAgentRunInput,
   WikiLintDiagnostic,
 } from "../ingest/index.ts"
+import type {
+  WikiUpdateAgentEvent,
+  WikiUpdateAgentSession,
+} from "../update/index.ts"
+import { WikiUpdateAgentError } from "../update/index.ts"
 
 export type PiThinkingLevel =
   "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
@@ -146,6 +151,195 @@ export function createPiWikiAgent(options: PiAgentOptions): WikiAgent {
 
       return { summary, output: result.output, usage: result.usage }
     },
+  }
+}
+
+export function createPiWikiUpdateAgentSession(
+  options: PiAgentOptions
+): WikiUpdateAgentSession {
+  let activeWorkspacePath: string | undefined
+  let activeSession:
+    Awaited<ReturnType<typeof createUpdatePiSession>> | undefined
+  let disposed = false
+
+  return {
+    name: `${options.provider}/${options.model}`,
+    async prompt(input) {
+      if (disposed) throw new Error("Pi update session is closed")
+      if (
+        activeWorkspacePath !== undefined &&
+        activeWorkspacePath !== input.workspacePath
+      ) {
+        throw new Error("Pi update session cannot change wiki worktrees")
+      }
+      activeWorkspacePath = input.workspacePath
+      let unsubscribe: () => void = () => undefined
+      try {
+        activeSession ??= await createUpdatePiSession(
+          options,
+          input.workspacePath
+        )
+        const { session } = activeSession
+        unsubscribe = session.subscribe((event) =>
+          reportUpdateEvent(event, input.onEvent)
+        )
+        const deadline = Date.now() + (options.timeoutMs ?? 10 * 60 * 1000)
+        let output = ""
+        const maxRepairAttempts = options.maxRepairAttempts ?? 1
+        for (let attempt = 0; ; attempt += 1) {
+          input.signal?.throwIfAborted()
+          const remainingMs = deadline - Date.now()
+          if (remainingMs <= 0) {
+            throw new Error(
+              `Pi run timed out after ${options.timeoutMs ?? 10 * 60 * 1000}ms`
+            )
+          }
+          await promptWithTimeout(
+            session,
+            attempt === 0
+              ? input.prompt
+              : createLintRepairPrompt(await input.lint()),
+            remainingMs,
+            options.timeoutMs ?? 10 * 60 * 1000,
+            input.signal
+          )
+          output = getSuccessfulAssistantOutput(session)
+          const diagnostics = await input.lint()
+          input.signal?.throwIfAborted()
+          if (diagnostics.length === 0) break
+          if (attempt >= maxRepairAttempts) {
+            throw new WikiLintError(diagnostics)
+          }
+          input.onEvent?.({ type: "repair" })
+        }
+        const stats = session.getSessionStats()
+        return {
+          output,
+          summary:
+            output
+              .split("\n")
+              .find((line) => line.trim())
+              ?.replace(/^#+\s*/, "")
+              .trim() || "Update wiki",
+          usage: {
+            inputTokens: stats.tokens.input,
+            outputTokens: stats.tokens.output,
+            cost: stats.cost,
+          },
+        }
+      } catch (error) {
+        if (isAbortError(error) || error instanceof WikiLintError) throw error
+        throw new WikiUpdateAgentError(
+          error instanceof Error ? error.message : "Pi update session failed",
+          { cause: error }
+        )
+      } finally {
+        unsubscribe()
+      }
+    },
+    async abort() {
+      await activeSession?.session.abort().catch(() => undefined)
+    },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      activeSession?.session.dispose()
+      activeSession = undefined
+    },
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  )
+}
+
+async function createUpdatePiSession(
+  options: PiAgentOptions,
+  workspacePath: string
+) {
+  const agentDir = getAgentDirectory()
+  const authStorage = AuthStorage.create(join(agentDir, "auth.json"))
+  const modelRegistry = ModelRegistry.create(
+    authStorage,
+    join(agentDir, "models.json")
+  )
+  const model = modelRegistry.find(options.provider, options.model)
+  if (!model)
+    throw new Error(`Pi model not found: ${options.provider}/${options.model}`)
+  const settingsManager = SettingsManager.create(workspacePath, agentDir)
+  const skills = loadSkills({
+    cwd: workspacePath,
+    agentDir,
+    skillPaths: [options.skillPath],
+    includeDefaults: false,
+  })
+  if (skills.skills.length !== 1) {
+    throw new Error(`Could not load Pi skill: ${options.skillPath}`)
+  }
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: workspacePath,
+    agentDir,
+    settingsManager,
+    noExtensions: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    skillsOverride: () => skills,
+  })
+  await resourceLoader.reload()
+  return await createAgentSession({
+    cwd: workspacePath,
+    agentDir,
+    authStorage,
+    modelRegistry,
+    model,
+    thinkingLevel: options.thinking ?? "high",
+    tools: ["read", "edit", "write", "grep", "find", "ls"],
+    noTools: "builtin",
+    customTools: createConfinedTools(workspacePath, [
+      "read",
+      "edit",
+      "write",
+      "grep",
+      "find",
+      "ls",
+    ]),
+    resourceLoader,
+    sessionManager: SessionManager.inMemory(workspacePath),
+    settingsManager,
+  })
+}
+
+function reportUpdateEvent(
+  event: AgentSessionEvent,
+  onEvent?: (event: WikiUpdateAgentEvent) => void
+) {
+  if (!onEvent) return
+  if (
+    event.type === "message_update" &&
+    event.assistantMessageEvent.type === "text_delta"
+  ) {
+    onEvent({
+      type: "assistant-delta",
+      text: event.assistantMessageEvent.delta,
+    })
+  } else if (event.type === "tool_execution_start") {
+    onEvent({
+      type: "tool-start",
+      callId: event.toolCallId,
+      toolName: event.toolName,
+      input: event.args,
+    })
+  } else if (event.type === "tool_execution_end") {
+    onEvent({
+      type: "tool-end",
+      callId: event.toolCallId,
+      toolName: event.toolName,
+      isError: event.isError,
+    })
   }
 }
 

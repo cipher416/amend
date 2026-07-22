@@ -10,6 +10,7 @@ import type {
   WikiHome,
   WikiListItem,
   WikiSummary,
+  WikiUpdateSession,
 } from "@workspace/contract"
 
 export const providerStatusKey = ["providers", "status"] as const
@@ -22,6 +23,8 @@ export const wikiFilesKey = (wikiId: string) =>
   ["wiki", wikiId, "files"] as const
 export const wikiFileKey = (wikiId: string, path: string) =>
   ["wiki", wikiId, "file", path] as const
+export const wikiUpdateKey = (wikiId: string) =>
+  ["wiki", wikiId, "update", "current"] as const
 
 export async function readProviderStatus(
   api: AmendApi
@@ -73,6 +76,12 @@ export async function readFile(
   path: string
 ): Promise<WikiFileContent> {
   return unwrapResult(await api.wiki.readFile({ path }))
+}
+
+export async function readCurrentUpdate(
+  api: AmendApi
+): Promise<WikiUpdateSession | null> {
+  return unwrapResult(await api.wiki.currentUpdate())
 }
 
 export async function searchWiki(
