@@ -32,6 +32,8 @@ import { Controller, useForm } from "react-hook-form"
 
 import { errorMessage } from "@/lib/amend-client"
 
+import { useWikiSession } from "./wiki-session"
+
 const documentAccept = {
   "application/pdf": [".pdf"],
   "text/markdown": [".md", ".markdown"],
@@ -51,6 +53,7 @@ export function WikiAddDocument({
   wiki: WikiSummary
   running: boolean
 }) {
+  const { trackBackgroundIngest } = useWikiSession()
   const [open, setOpen] = useState(false)
   const [document, setDocument] = useState<SourceDocumentSelection>()
   const [sourceFiles, setSourceFiles] = useState<File[]>()
@@ -107,6 +110,11 @@ export function WikiAddDocument({
         setError(response.error.message)
         return
       }
+      trackBackgroundIngest({
+        jobId: response.value.jobId,
+        wikiId: wiki.id,
+        wikiName: wiki.name,
+      })
       setOpen(false)
       reset()
     } catch (cause) {

@@ -408,13 +408,19 @@ function WorkflowStepView({
         <PiConnectStep api={api} onConnected={onProviderConnected} />
       ) : wiki?.setupStatus === "ready" &&
         (!job || (job.status === "completed" && job.result)) ? (
-        <WikiReadyStep
-          wiki={wiki}
-          ingest={job?.result}
-          refreshing={state.busy === "index"}
-          error={error}
-          onRetryIndex={onRetryIndex}
-        />
+        <WorkflowReadyTransition
+          animate={Boolean(
+            state.wiki && job?.status === "completed" && job.result
+          )}
+        >
+          <WikiReadyStep
+            wiki={wiki}
+            ingest={job?.result}
+            refreshing={state.busy === "index"}
+            error={error}
+            onRetryIndex={onRetryIndex}
+          />
+        </WorkflowReadyTransition>
       ) : (
         <WikiSetupStep
           wiki={wiki}
@@ -435,6 +441,26 @@ function WorkflowStepView({
         />
       )}
     </WorkflowShell>
+  )
+}
+
+function WorkflowReadyTransition({
+  animate,
+  children,
+}: {
+  animate: boolean
+  children: ReactNode
+}) {
+  return (
+    <div
+      className={
+        animate
+          ? "transition-[opacity,transform] duration-[220ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:duration-150 motion-reduce:ease-out starting:scale-95 starting:opacity-0 motion-reduce:starting:scale-100"
+          : undefined
+      }
+    >
+      {children}
+    </div>
   )
 }
 

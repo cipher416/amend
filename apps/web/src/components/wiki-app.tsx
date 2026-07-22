@@ -24,6 +24,7 @@ import { readFile, wikiFileKey } from "@/lib/wiki-queries"
 import { ThemeProvider } from "./theme"
 import { WikiFileSearch } from "./wiki-file-search"
 import { parseMarkdownDocument, WikiFileViewer } from "./wiki-file-viewer"
+import { WikiIngestCompletionToast } from "./wiki-ingest-completion-toast"
 import { WikiSession, useWikiSession } from "./wiki-session"
 import type { WikiBusy } from "./wiki-session"
 import { WikiSidebar } from "./wiki-sidebar"
@@ -52,7 +53,17 @@ export function WikiApp({ wikiId }: { wikiId: string }) {
 }
 
 function WikiAppContent() {
-  const { desktop, opening, wiki, wikis, files, busy, error } = useWikiSession()
+  const {
+    desktop,
+    opening,
+    wiki,
+    wikis,
+    files,
+    busy,
+    error,
+    ingestCompletionNotice,
+    dismissIngestCompletionNotice,
+  } = useWikiSession()
   const { _splat: selectedPath } = useParams({ strict: false })
 
   if (opening) return <WikiOpening />
@@ -64,24 +75,31 @@ function WikiAppContent() {
   const running = wikis.some((item) => item.id === wiki.id && item.running)
 
   return (
-    <WikiViewContext.Provider value={{ desktop, wiki, files, busy, error }}>
-      <WikiShell
-        sidebar={
-          <WikiSidebar
-            desktop={desktop}
-            wiki={wiki}
-            wikis={wikis}
-            files={files}
-            selectedPath={selectedPath}
-            switching={busy === "switch"}
-            loadingFiles={busy === "files"}
-            running={running}
-          />
-        }
-      >
-        <Outlet />
-      </WikiShell>
-    </WikiViewContext.Provider>
+    <>
+      <WikiViewContext.Provider value={{ desktop, wiki, files, busy, error }}>
+        <WikiShell
+          sidebar={
+            <WikiSidebar
+              desktop={desktop}
+              wiki={wiki}
+              wikis={wikis}
+              files={files}
+              selectedPath={selectedPath}
+              switching={busy === "switch"}
+              loadingFiles={busy === "files"}
+              running={running}
+            />
+          }
+        >
+          <Outlet />
+        </WikiShell>
+      </WikiViewContext.Provider>
+      <WikiIngestCompletionToast
+        key={ingestCompletionNotice?.jobId}
+        notice={ingestCompletionNotice}
+        onDismiss={dismissIngestCompletionNotice}
+      />
+    </>
   )
 }
 

@@ -180,7 +180,7 @@ export function WikiSetupStep({
         </Field>
 
         {document ? (
-          <>
+          <div className="transition-[opacity,transform] duration-[220ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:duration-150 motion-reduce:ease-out starting:translate-y-1 starting:opacity-0 motion-reduce:starting:translate-y-0">
             <Controller
               name="wikiName"
               control={form.control}
@@ -247,7 +247,7 @@ export function WikiSetupStep({
                 </Field>
               )}
             />
-          </>
+          </div>
         ) : null}
 
         {job?.error ? (

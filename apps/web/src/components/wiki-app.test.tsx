@@ -326,7 +326,86 @@ describe("wiki app", () => {
         objective: "Preserve incident response decisions",
       })
     )
-    expect(screen.queryByRole("heading", { name: "Add document" })).toBeNull()
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Add document" })).toBeNull()
+    )
+  })
+
+  it("notifies the current session when its added document finishes ingesting", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add document" })
+    )
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    if (!input) throw new Error("Expected the document file input")
+    await user.upload(
+      input,
+      new File(["source"], "incident-review.md", { type: "text/markdown" })
+    )
+    await user.click(screen.getByRole("button", { name: "Add to wiki" }))
+
+    await act(() => {
+      api.emitIngestChanged({
+        wikiId: wikiSummary.id,
+        job: { ...completedIngestJob, result: undefined },
+      })
+    })
+
+    expect(
+      (
+        await screen.findByRole("status", {
+          name: "Document added to wiki",
+        })
+      ).textContent
+    ).toContain("Document added to Reliability Wiki")
+  })
+
+  it("notifies when an added document completes before startIngest resolves", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    api.wiki.startIngest = vi.fn(async () => {
+      api.emitIngestChanged({ wikiId: wikiSummary.id, job: completedIngestJob })
+      return success({ jobId: completedIngestJob.id })
+    })
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+    await waitFor(() => expect(api.wiki.onIngestChanged).toHaveBeenCalledOnce())
+    await user.click(
+      await screen.findByRole("button", { name: "Add document" })
+    )
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    if (!input) throw new Error("Expected the document file input")
+    await user.upload(
+      input,
+      new File(["source"], "incident-review.md", { type: "text/markdown" })
+    )
+    await user.click(screen.getByRole("button", { name: "Add to wiki" }))
+
+    expect(
+      await screen.findByRole("status", { name: "Document added to wiki" })
+    ).toBeDefined()
+  })
+
+  it("does not notify for ingest jobs this session did not start", async () => {
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+    await screen.findByRole("button", { name: "Add document" })
+
+    await act(() => {
+      api.emitIngestChanged({ wikiId: wikiSummary.id, job: completedIngestJob })
+    })
+
+    expect(
+      screen.queryByRole("status", { name: "Document added to wiki" })
+    ).toBeNull()
   })
 
   it("disables adding a document while the active wiki is ingesting", async () => {

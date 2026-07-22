@@ -2,11 +2,19 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import type {
   AmendApi,
+  WikiIngestJob,
   WikiListItem,
   WikiSummary,
   WikiFileTreeItem,
 } from "@workspace/contract"
-import { createContext, useContext, useEffect, useState } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import type { ReactNode } from "react"
 
 import { errorMessage } from "@/lib/amend-client"
@@ -18,10 +26,16 @@ import {
   readCurrentWiki,
   wikiCurrentKey,
   wikiFilesKey,
+  wikiIngestKey,
   wikisKey,
 } from "@/lib/wiki-queries"
 
 export type WikiBusy = "switch" | "files" | "file" | null
+
+export interface WikiIngestCompletionNotice {
+  jobId: string
+  wikiName: string
+}
 
 interface WikiSessionValue {
   desktop: AmendApi
@@ -31,6 +45,13 @@ interface WikiSessionValue {
   files: readonly WikiFileTreeItem[]
   busy: WikiBusy
   error?: string
+  ingestCompletionNotice?: WikiIngestCompletionNotice
+  dismissIngestCompletionNotice: (jobId: string) => void
+  trackBackgroundIngest: (input: {
+    jobId: string
+    wikiId: string
+    wikiName: string
+  }) => void
 }
 
 const WikiSessionContext = createContext<WikiSessionValue | null>(null)
@@ -69,6 +90,67 @@ function useWikiSessionState({
 }): WikiSessionValue {
   const queryClient = useRouter().options.context.queryClient
   const [operationError, setOperationError] = useState<string>()
+  const [ingestCompletionNotices, setIngestCompletionNotices] = useState<
+    readonly WikiIngestCompletionNotice[]
+  >([])
+  const trackedBackgroundIngests = useRef(new Map<string, string>())
+  const notifiedBackgroundIngests = useRef(new Set<string>())
+
+  const showCompletedBackgroundIngest = useCallback(
+    (event: { wikiId: string; job: WikiIngestJob }) => {
+      const key = `${event.wikiId}:${event.job.id}`
+      const wikiName = trackedBackgroundIngests.current.get(key)
+      if (
+        !wikiName ||
+        notifiedBackgroundIngests.current.has(key) ||
+        event.job.status !== "completed"
+      ) {
+        return
+      }
+
+      notifiedBackgroundIngests.current.add(key)
+      trackedBackgroundIngests.current.delete(key)
+      setIngestCompletionNotices((notices) => [
+        ...notices,
+        { jobId: event.job.id, wikiName },
+      ])
+    },
+    []
+  )
+
+  const trackBackgroundIngest = useCallback(
+    ({
+      jobId,
+      wikiId: startedWikiId,
+      wikiName,
+    }: {
+      jobId: string
+      wikiId: string
+      wikiName: string
+    }) => {
+      const key = `${startedWikiId}:${jobId}`
+      trackedBackgroundIngests.current.set(key, wikiName)
+      const currentJob = queryClient.getQueryData<WikiIngestJob>(
+        wikiIngestKey(startedWikiId)
+      )
+      if (currentJob?.id === jobId) {
+        showCompletedBackgroundIngest({
+          wikiId: startedWikiId,
+          job: currentJob,
+        })
+      }
+    },
+    [queryClient, showCompletedBackgroundIngest]
+  )
+
+  const dismissIngestCompletionNotice = useCallback((jobId: string) => {
+    setIngestCompletionNotices((notices) =>
+      notices[0]?.jobId === jobId
+        ? notices.slice(1)
+        : notices.filter((notice) => notice.jobId !== jobId)
+    )
+  }, [])
+
   const currentWiki = useQuery(
     {
       queryKey: wikiCurrentKey,
@@ -120,10 +202,11 @@ function useWikiSessionState({
 
   useEffect(
     () =>
-      desktop.wiki.onIngestChanged((event) =>
+      desktop.wiki.onIngestChanged((event) => {
         projectWikiIngestChanged(queryClient, event)
-      ),
-    [desktop, queryClient]
+        showCompletedBackgroundIngest(event)
+      }),
+    [desktop, queryClient, showCompletedBackgroundIngest]
   )
 
   const resolvingRouteWiki = Boolean(!readyWiki && !activateWiki.isError)
@@ -138,6 +221,7 @@ function useWikiSessionState({
     queryErrorMessage(currentWiki.error) ??
     queryErrorMessage(wikis.error) ??
     queryErrorMessage(files.error)
+  const ingestCompletionNotice = ingestCompletionNotices[0]
 
   return {
     desktop,
@@ -147,6 +231,9 @@ function useWikiSessionState({
     files: files.data ?? [],
     busy,
     error,
+    ingestCompletionNotice,
+    dismissIngestCompletionNotice,
+    trackBackgroundIngest,
   }
 }
 
