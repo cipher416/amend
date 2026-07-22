@@ -112,21 +112,28 @@ export function parseMarkdownFrontmatter(
   content: string,
   path: string
 ): { frontmatter: Map<string, unknown>; body: string } {
-  if (!content.startsWith("---\n")) {
+  const opening = /^---\r?\n/.exec(content)
+  if (!opening) {
     throw new Error(`Wiki page is missing YAML frontmatter: ${path}`)
   }
-  const end = content.indexOf("\n---\n", 4)
-  if (end === -1) {
+  const closingPattern = /\r?\n---\r?\n/g
+  closingPattern.lastIndex = opening[0].length
+  const closing = closingPattern.exec(content)
+  if (!closing) {
     throw new Error(`Wiki page frontmatter is not closed: ${path}`)
   }
-  const value = parseYaml(content.slice(4, end)) as unknown
+  const value = parseYaml(
+    content.slice(opening[0].length, closing.index)
+  ) as unknown
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`Wiki page frontmatter must be a YAML object: ${path}`)
   }
   assertSafeValidationValue(value)
   return {
     frontmatter: new Map(Object.entries(value)),
-    body: content.slice(end + "\n---\n".length).replace(/^\n/, ""),
+    body: content
+      .slice(closing.index + closing[0].length)
+      .replace(/^\r?\n/, ""),
   }
 }
 

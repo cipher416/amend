@@ -25,6 +25,171 @@ afterEach(async () => {
 })
 
 describe("wiki update proposal", () => {
+  it("allows unchanged validation debt that predates the update session", async () => {
+    const workspacePath = await createReadyWiki()
+    await writeFile(
+      join(workspacePath, "concepts/legacy-page.md"),
+      "# Legacy page without frontmatter\n"
+    )
+    await writeFile(
+      join(workspacePath, "index.md"),
+      `${await readFile(join(workspacePath, "index.md"), "utf8")}- [[legacy-page]]\n`
+    )
+    await git(workspacePath, "add", "--all")
+    await git(workspacePath, "commit", "-m", "Legacy validation debt")
+    const session = await createWikiUpdateProposalSession({
+      workspacePath,
+      agent: fakeUpdateAgent(async () => undefined),
+    })
+
+    const turn = await session.runTurn({
+      prompt: "Answer without changing unrelated legacy content.",
+    })
+
+    expect(turn.changedFiles).toEqual([])
+    await session.discard()
+  })
+
+  it("still rejects validation debt introduced after the session starts", async () => {
+    const workspacePath = await createReadyWiki()
+    await writeFile(
+      join(workspacePath, "concepts/legacy-page.md"),
+      "# Legacy page without frontmatter\n"
+    )
+    await writeFile(
+      join(workspacePath, "index.md"),
+      `${await readFile(join(workspacePath, "index.md"), "utf8")}- [[legacy-page]]\n`
+    )
+    await git(workspacePath, "add", "--all")
+    await git(workspacePath, "commit", "-m", "Legacy validation debt")
+    const session = await createWikiUpdateProposalSession({
+      workspacePath,
+      agent: fakeUpdateAgent(async (worktreePath) => {
+        await writeFile(
+          join(worktreePath, "concepts/new-invalid-page.md"),
+          "# Newly invalid page\n"
+        )
+        await writeFile(
+          join(worktreePath, "index.md"),
+          `${await readFile(join(worktreePath, "index.md"), "utf8")}- [[new-invalid-page]]\n`
+        )
+      }),
+    })
+
+    await expect(
+      session.runTurn({ prompt: "Create another page." })
+    ).rejects.toMatchObject({
+      diagnostics: [
+        expect.objectContaining({
+          code: "frontmatter.invalid",
+          path: "concepts/new-invalid-page.md",
+        }),
+      ],
+    })
+    await session.discard()
+  })
+
+  it("rejects edits to a page with grandfathered validation debt", async () => {
+    const workspacePath = await createReadyWiki()
+    await writeFile(
+      join(workspacePath, "concepts/legacy-page.md"),
+      "# Legacy page without frontmatter\n"
+    )
+    await writeFile(
+      join(workspacePath, "index.md"),
+      `${await readFile(join(workspacePath, "index.md"), "utf8")}- [[legacy-page]]\n`
+    )
+    await git(workspacePath, "add", "--all")
+    await git(workspacePath, "commit", "-m", "Legacy validation debt")
+    const session = await createWikiUpdateProposalSession({
+      workspacePath,
+      agent: fakeUpdateAgent(async (worktreePath) => {
+        await writeFile(
+          join(worktreePath, "concepts/legacy-page.md"),
+          "# Edited legacy page without frontmatter\n"
+        )
+      }),
+    })
+
+    await expect(
+      session.runTurn({ prompt: "Edit the legacy page." })
+    ).rejects.toMatchObject({
+      diagnostics: [
+        expect.objectContaining({
+          code: "frontmatter.invalid",
+          path: "concepts/legacy-page.md",
+        }),
+      ],
+    })
+    await session.discard()
+  })
+
+  it("allows unchanged validation debt spanning multiple pages", async () => {
+    const workspacePath = await createReadyWiki()
+    await writeFile(
+      join(workspacePath, "entities/write-ahead-logging.md"),
+      await readFile(
+        join(workspacePath, "concepts/write-ahead-logging.md"),
+        "utf8"
+      )
+    )
+    await git(workspacePath, "add", "--all")
+    await git(workspacePath, "commit", "-m", "Duplicate legacy page slug")
+    const session = await createWikiUpdateProposalSession({
+      workspacePath,
+      agent: fakeUpdateAgent(async () => undefined),
+    })
+
+    await expect(
+      session.runTurn({ prompt: "Answer without changing the wiki." })
+    ).resolves.toMatchObject({ changedFiles: [] })
+    await session.discard()
+  })
+
+  it("rejects edits to a page implicated by multi-page validation debt", async () => {
+    const workspacePath = await createReadyWiki()
+    const duplicatePath = join(workspacePath, "entities/write-ahead-logging.md")
+    await writeFile(
+      duplicatePath,
+      await readFile(
+        join(workspacePath, "concepts/write-ahead-logging.md"),
+        "utf8"
+      )
+    )
+    await git(workspacePath, "add", "--all")
+    await git(workspacePath, "commit", "-m", "Duplicate legacy page slug")
+    const session = await createWikiUpdateProposalSession({
+      workspacePath,
+      agent: fakeUpdateAgent(async (worktreePath) => {
+        const path = join(worktreePath, "entities/write-ahead-logging.md")
+        await writeFile(path, `${await readFile(path, "utf8")}\nEdited.\n`)
+      }),
+    })
+
+    await expect(
+      session.runTurn({ prompt: "Edit the duplicate legacy page." })
+    ).rejects.toMatchObject({
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({ code: "page.duplicate-slug" }),
+      ]),
+    })
+    await session.discard()
+  })
+
+  it("validates update worktrees checked out with Windows line endings", async () => {
+    const workspacePath = await createReadyWiki()
+    await git(workspacePath, "config", "core.autocrlf", "true")
+    const session = await createWikiUpdateProposalSession({
+      workspacePath,
+      agent: fakeUpdateAgent(async () => undefined),
+    })
+
+    await expect(
+      session.runTurn({ prompt: "Answer without changing the wiki." })
+    ).resolves.toMatchObject({ changedFiles: [] })
+    await session.discard()
+  })
+
   it("gives the agent exact managed paths and deletion guidance", async () => {
     const workspacePath = await createReadyWiki()
     let prompt = ""

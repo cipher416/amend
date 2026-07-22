@@ -128,6 +128,30 @@ export async function createWikiUpdateProposalSession(
     "utf8"
   )
   const protectedAmend = await readFilesUnder(join(worktreePath, ".amend"))
+  const baselineDiagnostics = new Map<
+    string,
+    ReadonlyMap<string, string | undefined>
+  >()
+  for (const diagnostic of await lintWikiStructure(worktreePath)) {
+    const paths = diagnostic.path ? [diagnostic.path] : diagnostic.relatedPaths
+    if (!paths) continue
+    baselineDiagnostics.set(
+      diagnosticKey(diagnostic),
+      new Map(
+        await Promise.all(
+          paths.map(
+            async (path) =>
+              [
+                path,
+                await readFile(join(worktreePath, path), "utf8").catch(
+                  () => undefined
+                ),
+              ] as const
+          )
+        )
+      )
+    )
+  }
   const createRunId = options.createRunId ?? randomUUID
   const now = options.now ?? (() => new Date())
   let disposed = false
@@ -186,7 +210,24 @@ export async function createWikiUpdateProposalSession(
         })
       }
     }
-    return uniqueDiagnostics(diagnostics)
+    const currentDiagnostics = uniqueDiagnostics(diagnostics)
+    const grandfathered = await Promise.all(
+      currentDiagnostics.map(async (diagnostic) => {
+        const baseline = baselineDiagnostics.get(diagnosticKey(diagnostic))
+        if (!baseline) return false
+        const matches = await Promise.all(
+          [...baseline].map(async ([path, content]) => {
+            const currentContent = await readFile(
+              join(worktreePath, path),
+              "utf8"
+            ).catch(() => undefined)
+            return currentContent === content
+          })
+        )
+        return matches.every(Boolean)
+      })
+    )
+    return currentDiagnostics.filter((_, index) => !grandfathered[index])
   }
 
   async function runTurn(input: {
@@ -530,11 +571,15 @@ function uniqueDiagnostics(
 ): WikiValidationDiagnostic[] {
   const seen = new Set<string>()
   return diagnostics.filter((diagnostic) => {
-    const key = `${diagnostic.code}\0${diagnostic.path ?? ""}\0${diagnostic.message}`
+    const key = diagnosticKey(diagnostic)
     if (seen.has(key)) return false
     seen.add(key)
     return true
   })
+}
+
+function diagnosticKey(diagnostic: WikiValidationDiagnostic): string {
+  return `${diagnostic.code}\0${diagnostic.path ?? ""}\0${diagnostic.message}`
 }
 
 async function snapshotDraft(worktreePath: string) {

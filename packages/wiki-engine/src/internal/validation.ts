@@ -11,6 +11,7 @@ export interface WikiValidationDiagnostic {
   code: string
   message: string
   path?: string
+  relatedPaths?: readonly string[]
 }
 
 export async function lintWikiStructure(
@@ -22,6 +23,7 @@ export async function lintWikiStructure(
     diagnostics.push({
       code: "page.missing",
       message: "The wiki must contain at least one page",
+      relatedPaths: [],
     })
   }
   const index = await readFile(join(wikiPath, "index.md"), "utf8").catch(
@@ -47,6 +49,7 @@ export async function lintWikiStructure(
       diagnostics.push({
         code: "page.duplicate-slug",
         message: `Page slug ${pageName} is duplicated by ${paths.join(", ")}`,
+        relatedPaths: paths,
       })
     }
   }
