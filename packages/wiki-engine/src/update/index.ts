@@ -3,7 +3,10 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, relative } from "node:path"
 
-import { wikiPageDirectories } from "../internal/format.ts"
+import {
+  wikiPageDirectories,
+  wikiPageDirectoryList,
+} from "../internal/format.ts"
 import { git } from "../internal/git.ts"
 import { lintWikiStructure, readFilesUnder } from "../internal/validation.ts"
 import type { WikiValidationDiagnostic } from "../internal/validation.ts"
@@ -496,7 +499,7 @@ async function writeGeneratedLog(
 }
 
 function createUpdatePrompt(prompt: string, contextPath?: string): string {
-  return `Maintain this wiki according to the loaded llm-wiki skill.\n\nThe user requested an interactive wiki update. Inspect the wiki, make the requested changes now, and then explain the result.\n\nRequirements:\n- Never modify raw/, SCHEMA.md, log.md, .amend/, or Git metadata.\n- Only create, update, or delete wiki pages and keep index.md consistent.\n- Preserve provenance and do not invent unsupported facts.\n- Keep frontmatter, sources, tags, and wikilinks valid.\n- Do not run Git or create commits; Amend owns Git history.${
+  return `Maintain this wiki according to the loaded llm-wiki skill.\n\nThe user requested an interactive wiki update. Inspect the wiki, make the requested changes now, and then explain the result.\n\nRequirements:\n- Never modify raw/, SCHEMA.md, log.md, .amend/, or Git metadata.\n- Create or update wiki pages only under ${wikiPageDirectoryList}.\n- Never create wiki pages at the wiki root. For example, write concepts/write-ahead-logging.md, not write-ahead-logging.md.\n- Use the delete tool when the user asks to remove an existing wiki page; also remove its index entry and repair affected wikilinks.\n- The only root file you may change is index.md.\n- Preserve provenance and do not invent unsupported facts.\n- Keep frontmatter, sources, tags, and wikilinks valid.\n- Do not run Git or create commits; Amend owns Git history.${
     contextPath ? `\n- The user opened this session from ${contextPath}.` : ""
   }\n\nUser request:\n${prompt.trim()}`
 }

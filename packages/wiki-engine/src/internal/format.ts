@@ -10,6 +10,10 @@ export const wikiPageDirectories = [
   "queries",
 ] as const
 
+export const wikiPageDirectoryList = formatList(
+  wikiPageDirectories.map((directory) => `${directory}/`)
+)
+
 export type WikiPageType = "entity" | "concept" | "comparison" | "query"
 export type WikiSourceKind = "article" | "paper" | "transcript"
 
@@ -32,6 +36,12 @@ const pageTypesByDirectory = new Map<string, WikiPageType>([
   ["comparisons", "comparison"],
   ["queries", "query"],
 ])
+
+function formatList(values: readonly string[]): string {
+  if (values.length === 0) return ""
+  if (values.length === 1) return values[0] ?? ""
+  return `${values.slice(0, -1).join(", ")}, or ${values.at(-1)}`
+}
 
 const tagPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const sourcePathPattern =

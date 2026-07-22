@@ -1,7 +1,7 @@
 ---
 name: llm-wiki
 description: Maintain an Amend wiki by integrating captured sources into a consistent, interlinked knowledge base.
-version: 2.2.0-amend.1
+version: 2.2.0-amend.2
 license: MIT
 metadata:
   upstream: https://github.com/NousResearch/hermes-agent/blob/d1383a6b1450c6c139720b1b01f8b99cc130453f/skills/research/llm-wiki/SKILL.md
@@ -23,6 +23,9 @@ Follow this sequence for every ingest.
 3. Search existing wiki pages for the source's central entities and concepts.
 4. Update an existing page when it already owns the topic. Create a page only
    when the subject is central to the source and useful within the wiki domain.
+   Page files must live under `entities/`, `concepts/`, `comparisons/`, or
+   `queries/`; never create a page at the wiki root. For example, use
+   `concepts/write-ahead-logging.md`, not `write-ahead-logging.md`.
 5. Preserve competing claims instead of silently replacing one with another.
 6. Keep each changed page's frontmatter valid under `SCHEMA.md`. Cite the raw
    source in `sources`, use specific lowercase kebab-case tags, and use
@@ -49,6 +52,7 @@ keep the requested scope explicit.
 3. Change only `entities/`, `concepts/`, `comparisons/`, `queries/`, and
    `index.md`. Never edit `raw/`, `SCHEMA.md`, `.amend/`, Git metadata, or
    `log.md`; the host application creates the append-only update log entry.
+   Never create a page at the wiki root.
 4. Preserve valid frontmatter, traceable source references, unique slugs,
    resolvable wikilinks, and a complete alphabetical `index.md`.
 5. After editing, inspect all affected pages together and summarize the final
@@ -70,5 +74,7 @@ the proposed files match the user's latest instructions.
 ## Available Tools
 
 Use the provided `read`, `grep`, `find`, and `ls` tools to orient and research
-inside the workspace. Use `edit` and `write` for managed wiki files. The host
+inside the workspace. Use `edit` and `write` for managed wiki files. Interactive
+update sessions also provide `delete`, which removes an existing managed wiki
+page; update `index.md` and affected wikilinks in the same turn. The host
 application captures sources, validates the result, and creates the Git commit.

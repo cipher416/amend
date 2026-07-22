@@ -20,6 +20,41 @@ afterEach(async () => {
 })
 
 describe("wiki engine", () => {
+  it("gives the agent exact managed paths for new wiki pages", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "amend-wiki-engine-"))
+    temporaryDirectories.push(parent)
+    const workspacePath = join(parent, "wiki")
+    const fakeAgent = createFakeAgent()
+    let prompt = ""
+    const engine = createWikiEngine({
+      agent: {
+        name: fakeAgent.name,
+        async run(input) {
+          prompt = input.prompt
+          return await fakeAgent.run(input)
+        },
+      },
+    })
+    await engine.initialize({
+      workspacePath,
+      domain: "Distributed systems engineering",
+    })
+
+    await engine.ingest({
+      workspacePath,
+      sources: [
+        {
+          path: "raw/articles/write-ahead-logging.md",
+          content: "# Write-ahead logging\n",
+        },
+      ],
+    })
+
+    expect(prompt).toContain("entities/, concepts/, comparisons/, or queries/")
+    expect(prompt).toContain("concepts/write-ahead-logging.md")
+    expect(prompt).toContain("Never create wiki pages at the wiki root")
+  })
+
   it("commits first and subsequent source runs while preserving both", async () => {
     const parent = await mkdtemp(join(tmpdir(), "amend-wiki-engine-"))
     temporaryDirectories.push(parent)

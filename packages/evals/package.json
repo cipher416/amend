@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "eval:wiki": "tsx src/wiki-live.eval.ts",
+    "eval:wiki-update": "tsx src/wiki-update-live.eval.ts",
     "lint": "eslint",
     "format": "prettier --write \"**/*.ts\"",
     "typecheck": "tsc --noEmit",

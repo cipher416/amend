@@ -1,9 +1,20 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { createPiWikiAgent, readPiAgentSettings } from "./pi.ts"
+import {
+  createPiWikiAgent,
+  createPiWikiUpdateAgentSession,
+  readPiAgentSettings,
+} from "./pi.ts"
 
 const sdk = vi.hoisted(() => ({
   createAgentSession: vi.fn(),
@@ -68,6 +79,7 @@ describe("Pi wiki agent", () => {
       workspacePath: "/wiki",
       prompt: "Maintain the wiki.",
       tools: ["read", "edit", "write", "grep", "find", "ls"],
+      writePolicy: "ingest",
       skillPath: "/skills/llm-wiki/SKILL.md",
       timeoutMs: 10 * 60 * 1000,
       lint,
@@ -223,8 +235,69 @@ describe("Pi wiki agent", () => {
       2,
       expect.stringContaining("[wikilink.broken]")
     )
+    expect(prompt).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("finish the ingest")
+    )
     expect(lint).toHaveBeenCalledTimes(2)
     expect(sdk.createAgentSession).toHaveBeenCalledOnce()
+  })
+
+  it("gives update repairs mode-specific actions for every diagnostic", async () => {
+    const prompt = vi.fn(async (_prompt: string) => undefined)
+    sdk.createAgentSession.mockResolvedValue({
+      session: createSession({ prompt }),
+    })
+    const lint = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          code: "path.unmanaged",
+          path: "root-page.md",
+          message: "The update changed an unmanaged path",
+        },
+        {
+          code: "index.missing",
+          path: "index.md",
+          message: "The wiki index is missing",
+        },
+        {
+          code: "page.duplicate-slug",
+          message: "The page slug is duplicated",
+        },
+        {
+          code: "frontmatter.missing-source",
+          path: "concepts/attention.md",
+          message: "The cited source is missing",
+        },
+        {
+          code: "raw.modified",
+          path: "raw/articles/source.md",
+          message: "The update modified protected raw content",
+        },
+      ])
+      .mockResolvedValueOnce([])
+    const agent = createPiWikiUpdateAgentSession({
+      provider: "openai-codex",
+      model: "gpt-test",
+      skillPath: "/skills/llm-wiki/SKILL.md",
+    })
+
+    await agent.prompt({
+      workspacePath: "/wiki",
+      prompt: "Maintain the wiki.",
+      lint,
+    })
+
+    const repairPrompt = prompt.mock.calls[1]?.[0]
+    expect(repairPrompt).toContain("finish the update")
+    expect(repairPrompt).not.toContain("finish the ingest")
+    expect(repairPrompt).toContain("Move the page to a managed directory")
+    expect(repairPrompt).toContain("Recreate index.md")
+    expect(repairPrompt).toContain("Choose one canonical page slug")
+    expect(repairPrompt).toContain("Correct or remove missing source paths")
+    expect(repairPrompt).toContain("Restore protected content")
+    agent.dispose()
   })
 
   it("rejects after the bounded repair attempt remains invalid", async () => {
@@ -312,6 +385,150 @@ describe("Pi wiki agent", () => {
         readTool?.execute("call-2", { path: "escape/passwd" })
       ).rejects.toThrow("must not traverse symbolic links")
     }
+    await rm(parent, { recursive: true, force: true })
+  })
+
+  it("rejects ingest writes outside managed wiki paths", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "amend-pi-write-policy-"))
+    const workspacePath = join(parent, "wiki")
+    await mkdir(workspacePath)
+    sdk.createAgentSession.mockImplementation(async (sessionOptions) => {
+      const writeTool = sessionOptions.customTools?.find(
+        ({ name }: { name: string }) => name === "write"
+      )
+      return {
+        session: createSession({
+          prompt: async () => {
+            await writeTool?.execute("call-root-write", {
+              path: "transformer-architecture.md",
+              content: "invalid root page",
+            })
+          },
+        }),
+      }
+    })
+    const agent = createPiWikiAgent({
+      provider: "openai-codex",
+      model: "gpt-test",
+      skillPath: "/skills/llm-wiki/SKILL.md",
+    })
+
+    await expect(
+      agent.run({
+        workspacePath,
+        runId: "019f7910-0000-7000-8000-000000000001",
+        sourcePaths: ["raw/papers/paper.md"],
+        prompt: "Maintain the wiki.",
+        lint: vi.fn(async () => []),
+      })
+    ).rejects.toThrow("transformer-architecture.md")
+    await rm(parent, { recursive: true, force: true })
+  })
+
+  it("enforces update ownership for edit, write, and delete tools", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "amend-pi-update-policy-"))
+    const workspacePath = join(parent, "wiki")
+    await mkdir(join(workspacePath, "concepts"), { recursive: true })
+    await mkdir(join(workspacePath, "raw/articles"), { recursive: true })
+    await mkdir(join(workspacePath, ".amend"), { recursive: true })
+    await writeFile(join(workspacePath, "concepts/attention.md"), "managed")
+    await writeFile(join(workspacePath, "index.md"), "index")
+    await writeFile(join(workspacePath, "log.md"), "log")
+    await writeFile(join(workspacePath, "SCHEMA.md"), "schema")
+    await writeFile(join(workspacePath, "raw/articles/source.md"), "raw")
+    await writeFile(join(workspacePath, ".amend/wiki.json"), "{}")
+    sdk.createAgentSession.mockResolvedValue({ session: createSession() })
+    const agent = createPiWikiUpdateAgentSession({
+      provider: "openai-codex",
+      model: "gpt-test",
+      skillPath: "/skills/llm-wiki/SKILL.md",
+    })
+    await agent.prompt({
+      workspacePath,
+      prompt: "Maintain the wiki.",
+      lint: vi.fn(async () => []),
+    })
+    const sessionOptions = sdk.createAgentSession.mock.calls[0]?.[0] as {
+      customTools?: Array<{
+        name: string
+        execute: (...arguments_: unknown[]) => Promise<unknown>
+      }>
+    }
+    const editTool = sessionOptions.customTools?.find(
+      ({ name }) => name === "edit"
+    )
+    const writeTool = sessionOptions.customTools?.find(
+      ({ name }) => name === "write"
+    )
+    const deleteTool = sessionOptions.customTools?.find(
+      ({ name }) => name === "delete"
+    )
+
+    for (const tool of [editTool, writeTool]) {
+      await expect(
+        tool?.execute("call-managed", { path: "concepts/attention.md" })
+      ).resolves.toBeDefined()
+      await expect(
+        tool?.execute("call-index", { path: "index.md" })
+      ).resolves.toBeDefined()
+      for (const path of [
+        "root-page.md",
+        "raw/articles/source.md",
+        "SCHEMA.md",
+        "log.md",
+        ".amend/wiki.json",
+      ]) {
+        await expect(
+          tool?.execute(`call-reject-${path}`, { path })
+        ).rejects.toThrow(path)
+      }
+    }
+    for (const path of ["index.md", "root-page.md", "raw/articles/source.md"]) {
+      await expect(
+        deleteTool?.execute(`call-reject-delete-${path}`, { path })
+      ).rejects.toThrow(path)
+    }
+
+    agent.dispose()
+    await rm(parent, { recursive: true, force: true })
+  })
+
+  it("lets update sessions delete managed wiki pages", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "amend-pi-delete-policy-"))
+    const workspacePath = join(parent, "wiki")
+    await mkdir(join(workspacePath, "concepts"), { recursive: true })
+    const pagePath = join(workspacePath, "concepts/obsolete-page.md")
+    await writeFile(pagePath, "obsolete")
+    sdk.createAgentSession.mockImplementation(async (sessionOptions) => {
+      const deleteTool = sessionOptions.customTools?.find(
+        ({ name }: { name: string }) => name === "delete"
+      )
+      return {
+        session: createSession({
+          prompt: async () => {
+            await deleteTool?.execute("call-delete", {
+              path: "concepts/obsolete-page.md",
+            })
+          },
+        }),
+      }
+    })
+    const agent = createPiWikiUpdateAgentSession({
+      provider: "openai-codex",
+      model: "gpt-test",
+      skillPath: "/skills/llm-wiki/SKILL.md",
+    })
+
+    await agent.prompt({
+      workspacePath,
+      prompt: "Delete the obsolete page.",
+      lint: vi.fn(async () => []),
+    })
+
+    await expect(readFile(pagePath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    })
+    agent.dispose()
     await rm(parent, { recursive: true, force: true })
   })
 

@@ -11,7 +11,11 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join, posix, resolve } from "node:path"
 
-import { isValidSourcePath, wikiPageDirectories } from "../internal/format.ts"
+import {
+  isValidSourcePath,
+  wikiPageDirectories,
+  wikiPageDirectoryList,
+} from "../internal/format.ts"
 import { git } from "../internal/git.ts"
 import { lintWikiStructure } from "../internal/validation.ts"
 import { validateWikiId } from "../internal/wiki-manifest.ts"
@@ -631,7 +635,9 @@ ${input.sourcePaths.map((path) => `- ${path}`).join("\n")}
 Requirements:
 - Orient by reading SCHEMA.md, index.md, and recent log.md first.
 - Never modify anything under raw/.
-- Create or update useful wiki pages based on the sources.
+- Create or update useful wiki pages only under ${wikiPageDirectoryList}.
+- Never create wiki pages at the wiki root. For example, write concepts/write-ahead-logging.md, not write-ahead-logging.md.
+- The only root files you may change are index.md and log.md.
 - Keep page frontmatter, wikilinks, index.md, and log.md consistent.
 - Give every wiki page at least one unique, lowercase kebab-case tag. Tags are open-ended.
 - Use [[wikilinks]] only for existing or newly created wiki page slugs. Keep raw source paths as plain text.

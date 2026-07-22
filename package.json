@@ -10,6 +10,7 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "eval:wiki": "pnpm --filter @workspace/evals eval:wiki",
+    "eval:wiki-update": "pnpm --filter @workspace/evals eval:wiki-update",
     "package:desktop": "pnpm --filter web build && pnpm --filter desktop package"
   },
   "devDependencies": {

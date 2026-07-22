@@ -1,4 +1,11 @@
-import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises"
+import {
+  lstat,
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -24,8 +31,13 @@ import type {
   CreateAgentSessionOptions,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent"
+import { Type } from "typebox"
 import type { TSchema } from "typebox"
 
+import {
+  wikiPageDirectoryList,
+  wikiPageTypeForPath,
+} from "../internal/format.ts"
 import { WikiLintError } from "../ingest/index.ts"
 import type {
   WikiAgent,
@@ -82,6 +94,7 @@ export interface PiSessionRunInput {
   workspacePath: string
   prompt: string
   tools: string[]
+  writePolicy?: PiWritePolicy
   skillPath?: string
   timeoutMs: number
   lint?: WikiAgentRunInput["lint"]
@@ -89,6 +102,8 @@ export interface PiSessionRunInput {
   onProgress?: (event: PiProgressEvent) => void
   signal?: AbortSignal
 }
+
+export type PiWritePolicy = "ingest" | "update"
 
 export interface PiSessionRunResult {
   output: string
@@ -135,6 +150,7 @@ export function createPiWikiAgent(options: PiAgentOptions): WikiAgent {
         workspacePath: input.workspacePath,
         prompt: input.prompt,
         tools: ["read", "edit", "write", "grep", "find", "ls"],
+        writePolicy: "ingest",
         skillPath: options.skillPath,
         timeoutMs: options.timeoutMs ?? 10 * 60 * 1000,
         lint: input.lint,
@@ -184,6 +200,7 @@ export function createPiWikiUpdateAgentSession(
           reportUpdateEvent(event, input.onEvent)
         )
         const deadline = Date.now() + (options.timeoutMs ?? 10 * 60 * 1000)
+        let turnPrompt = input.prompt
         let output = ""
         const maxRepairAttempts = options.maxRepairAttempts ?? 1
         for (let attempt = 0; ; attempt += 1) {
@@ -196,9 +213,7 @@ export function createPiWikiUpdateAgentSession(
           }
           await promptWithTimeout(
             session,
-            attempt === 0
-              ? input.prompt
-              : createLintRepairPrompt(await input.lint()),
+            turnPrompt,
             remainingMs,
             options.timeoutMs ?? 10 * 60 * 1000,
             input.signal
@@ -210,6 +225,7 @@ export function createPiWikiUpdateAgentSession(
           if (attempt >= maxRepairAttempts) {
             throw new WikiLintError(diagnostics)
           }
+          turnPrompt = createLintRepairPrompt(diagnostics, "update")
           input.onEvent?.({ type: "repair" })
         }
         const stats = session.getSessionStats()
@@ -297,16 +313,13 @@ async function createUpdatePiSession(
     modelRegistry,
     model,
     thinkingLevel: options.thinking ?? "high",
-    tools: ["read", "edit", "write", "grep", "find", "ls"],
+    tools: ["read", "edit", "write", "delete", "grep", "find", "ls"],
     noTools: "builtin",
-    customTools: createConfinedTools(workspacePath, [
-      "read",
-      "edit",
-      "write",
-      "grep",
-      "find",
-      "ls",
-    ]),
+    customTools: createConfinedTools(
+      workspacePath,
+      ["read", "edit", "write", "delete", "grep", "find", "ls"],
+      "update"
+    ),
     resourceLoader,
     sessionManager: SessionManager.inMemory(workspacePath),
     settingsManager,
@@ -411,7 +424,11 @@ async function runPiSession(
     thinkingLevel: input.thinking,
     tools: input.tools,
     noTools: "builtin",
-    customTools: createConfinedTools(input.workspacePath, input.tools),
+    customTools: createConfinedTools(
+      input.workspacePath,
+      input.tools,
+      input.writePolicy
+    ),
     resourceLoader,
     sessionManager: SessionManager.inMemory(input.workspacePath),
     settingsManager,
@@ -450,7 +467,10 @@ async function runPiSession(
       if (attempt >= maxRepairAttempts) {
         throw new WikiLintError(diagnostics)
       }
-      prompt = createLintRepairPrompt(diagnostics)
+      prompt = createLintRepairPrompt(
+        diagnostics,
+        input.writePolicy ?? "ingest"
+      )
     }
 
     const stats = session.getSessionStats()
@@ -542,21 +562,59 @@ function getSuccessfulAssistantOutput(
 }
 
 function createLintRepairPrompt(
-  diagnostics: readonly WikiLintDiagnostic[]
+  diagnostics: readonly WikiLintDiagnostic[],
+  writePolicy: PiWritePolicy
 ): string {
-  return `The deterministic wiki linter rejected the current wiki. Fix every diagnostic below, then finish the ingest. Do not modify raw sources or create Git commits.
+  const operation = writePolicy === "update" ? "update" : "ingest"
+  return `The deterministic wiki linter rejected the current wiki. Fix every diagnostic below, then finish the ${operation}. Do not modify raw sources or create Git commits.
 
 ${diagnostics
-  .map(
-    ({ code, message, path }) =>
-      `- [${code}]${path ? ` ${path}:` : ""} ${message}`
-  )
+  .map((diagnostic) => formatLintRepairDiagnostic(diagnostic, writePolicy))
   .join("\n")}`
+}
+
+function formatLintRepairDiagnostic(
+  { code, message, path }: WikiLintDiagnostic,
+  writePolicy: PiWritePolicy
+): string {
+  const diagnostic = `- [${code}]${path ? ` ${path}:` : ""} ${message}`
+  switch (code) {
+    case "path.unmanaged":
+      return `${diagnostic}\n  Action: Move the page to a managed directory (${wikiPageDirectoryList}). ${writableRootFiles(writePolicy)} Remove the unmanaged file if the available tools permit it; otherwise stop so Amend can roll back safely.`
+    case "page.missing":
+      return `${diagnostic}\n  Action: Create at least one sourced wiki page in a managed directory and list it in index.md.`
+    case "index.missing":
+      return `${diagnostic}\n  Action: Recreate index.md with every existing wiki page in the matching section.`
+    case "page.duplicate-slug":
+      return `${diagnostic}\n  Action: Choose one canonical page slug, merge or rename duplicates, and repair index entries and wikilinks.`
+    case "index.missing-page":
+      return `${diagnostic}\n  Action: add the page's wikilink and a concise summary to the matching index.md section.`
+    case "wikilink.broken":
+      return `${diagnostic}\n  Action: correct or remove the wikilink so it targets an existing wiki page slug.`
+    default:
+      if (code === "frontmatter.missing-source") {
+        return `${diagnostic}\n  Action: Correct or remove missing source paths; cite only existing immutable files under raw/.`
+      }
+      if (code.startsWith("frontmatter.")) {
+        return `${diagnostic}\n  Action: Repair the page's YAML frontmatter using SCHEMA.md while preserving its sourced body.`
+      }
+      if (code.endsWith(".modified")) {
+        return `${diagnostic}\n  Action: Restore protected content exactly; only managed wiki pages and permitted root files may change.`
+      }
+      return `${diagnostic}\n  Action: Re-read SCHEMA.md and correct this validation failure without changing protected content.`
+  }
+}
+
+function writableRootFiles(writePolicy: PiWritePolicy): string {
+  return writePolicy === "ingest"
+    ? "The only writable root files are index.md and log.md."
+    : "The only writable root file is index.md; Amend owns log.md."
 }
 
 function createConfinedTools(
   workspacePath: string,
-  toolNames: readonly string[]
+  toolNames: readonly string[],
+  writePolicy?: PiWritePolicy
 ): NonNullable<CreateAgentSessionOptions["customTools"]> {
   return toolNames.map((name) => {
     switch (name) {
@@ -568,13 +626,20 @@ function createConfinedTools(
       case "edit":
         return confineTool(
           createEditToolDefinition(workspacePath),
-          workspacePath
+          workspacePath,
+          writePolicy
         )
       case "write":
         return confineTool(
           createWriteToolDefinition(workspacePath),
-          workspacePath
+          workspacePath,
+          writePolicy
         )
+      case "delete":
+        if (writePolicy !== "update") {
+          throw new Error("The delete tool is only available for wiki updates")
+        }
+        return createDeleteTool(workspacePath)
       case "grep":
         return confineTool(
           createGrepToolDefinition(workspacePath),
@@ -595,7 +660,8 @@ function createConfinedTools(
 
 function confineTool<TParameters extends TSchema, TDetails, TState>(
   tool: ToolDefinition<TParameters, TDetails, TState>,
-  workspacePath: string
+  workspacePath: string,
+  writePolicy?: PiWritePolicy
 ) {
   return defineTool({
     ...tool,
@@ -605,6 +671,9 @@ function confineTool<TParameters extends TSchema, TDetails, TState>(
         workspacePath,
         pathInput
       )
+      if (tool.name === "edit" || tool.name === "write") {
+        assertWritableWikiPath(relativePath, writePolicy)
+      }
       if (tool.name === "read") {
         await lstat(targetPath).catch((error: unknown) => {
           throw new Error(`Pi tool path does not exist: ${pathInput}`, {
@@ -621,6 +690,60 @@ function confineTool<TParameters extends TSchema, TDetails, TState>(
       )
     },
   })
+}
+
+function createDeleteTool(workspacePath: string) {
+  return defineTool({
+    name: "delete",
+    label: "Delete wiki page",
+    description:
+      "Delete an existing managed wiki page. Only pages under entities/, concepts/, comparisons/, or queries/ may be deleted.",
+    parameters: Type.Object({
+      path: Type.String({
+        description:
+          "Relative path to a managed wiki page, such as concepts/attention.md",
+      }),
+    }),
+    async execute(_toolCallId, parameters) {
+      const { relativePath, targetPath } = await assertWorkspacePath(
+        workspacePath,
+        parameters.path
+      )
+      const wikiPath = relativePath.split(sep).join("/")
+      if (!wikiPageTypeForPath(wikiPath)) {
+        throw new Error(
+          `Only wiki pages under ${wikiPageDirectoryList} may be deleted. Rejected path: ${wikiPath}`
+        )
+      }
+      const stats = await lstat(targetPath).catch((error: unknown) => {
+        throw new Error(`Wiki page does not exist: ${wikiPath}`, {
+          cause: error,
+        })
+      })
+      if (!stats.isFile()) {
+        throw new Error(`Wiki page is not a file: ${wikiPath}`)
+      }
+      await rm(targetPath)
+      return {
+        content: [{ type: "text" as const, text: `Deleted ${wikiPath}` }],
+        details: { path: wikiPath },
+      }
+    },
+  })
+}
+
+function assertWritableWikiPath(
+  relativePath: string,
+  writePolicy?: PiWritePolicy
+): void {
+  if (!writePolicy) return
+  const wikiPath = relativePath.split(sep).join("/")
+  if (wikiPageTypeForPath(wikiPath)) return
+  if (wikiPath === "index.md") return
+  if (writePolicy === "ingest" && wikiPath === "log.md") return
+  throw new Error(
+    `Wiki ${writePolicy} cannot write ${wikiPath}. Wiki pages must be written under ${wikiPageDirectoryList}. ${writableRootFiles(writePolicy)}`
+  )
 }
 
 function getToolPath(parameters: unknown): string {

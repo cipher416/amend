@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises"
-import { homedir, tmpdir } from "node:os"
+import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { promisify } from "node:util"
 
@@ -43,14 +43,14 @@ try {
   const { provider, model, judgeModel } = resolveWikiEvalModels(settings)
   const agentThinking = parseThinking(
     process.env.AMEND_PI_THINKING ??
-      (provider === "openai-codex" ? "medium" : settings.thinking)
+      (provider === "openai-codex" ? "high" : settings.thinking)
   )
   const judgeThinking = parseThinking(
     process.env.AMEND_PI_JUDGE_THINKING ?? settings.thinking
   )
   const skillPath =
     process.env.AMEND_LLM_WIKI_SKILL ??
-    join(homedir(), ".agents/skills/research/llm-wiki/SKILL.md")
+    join(import.meta.dirname, "../../wiki-engine/skills/llm-wiki/SKILL.md")
   const sourceDocuments = await Promise.all(papers.map(loadPaperMarkdown))
   const agent = createPiWikiAgent({
     provider,

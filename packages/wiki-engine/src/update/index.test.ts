@@ -25,6 +25,25 @@ afterEach(async () => {
 })
 
 describe("wiki update proposal", () => {
+  it("gives the agent exact managed paths and deletion guidance", async () => {
+    const workspacePath = await createReadyWiki()
+    let prompt = ""
+    const session = await createWikiUpdateProposalSession({
+      workspacePath,
+      agent: fakeUpdateAgent(async (_worktreePath, agentPrompt) => {
+        prompt = agentPrompt
+      }),
+    })
+
+    await session.runTurn({ prompt: "Review the current organization." })
+
+    expect(prompt).toContain("entities/, concepts/, comparisons/, or queries/")
+    expect(prompt).toContain("concepts/write-ahead-logging.md")
+    expect(prompt).toContain("delete tool")
+    expect(prompt).toContain("Never create wiki pages at the wiki root")
+    await session.discard()
+  })
+
   it("keeps changes isolated until review and applies one validated commit", async () => {
     const workspacePath = await createReadyWiki()
     const agent = fakeUpdateAgent(async (worktreePath) => {
@@ -128,6 +147,41 @@ describe("wiki update proposal", () => {
     expect(turn.changedFiles).toEqual([])
     await expect(session.apply()).rejects.toThrow("no changes to apply")
     await session.discard()
+  })
+
+  it("reviews and applies a managed page deletion with its index repair", async () => {
+    const workspacePath = await createReadyWiki()
+    const session = await createWikiUpdateProposalSession({
+      workspacePath,
+      agent: fakeUpdateAgent(async (worktreePath) => {
+        await rm(join(worktreePath, "concepts/write-ahead-logging.md"))
+        await writeFile(
+          join(worktreePath, "index.md"),
+          "# Wiki Index\n\n## Concepts\n\n- [[checkpointing]]\n"
+        )
+      }),
+    })
+
+    const turn = await session.runTurn({
+      prompt: "Delete the write-ahead logging page and repair the index.",
+    })
+
+    expect(turn.changedFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "concepts/write-ahead-logging.md",
+          status: "deleted",
+        }),
+        expect.objectContaining({ path: "index.md", status: "modified" }),
+      ])
+    )
+    await session.apply()
+    await expect(
+      readFile(join(workspacePath, "concepts/write-ahead-logging.md"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" })
+    expect(
+      await readFile(join(workspacePath, "index.md"), "utf8")
+    ).not.toContain("write-ahead-logging")
   })
 
   it("restores the previous valid proposal when a follow-up fails", async () => {
@@ -254,8 +308,24 @@ The log supports recovery.
 `
   )
   await writeFile(
+    join(workspacePath, "concepts/checkpointing.md"),
+    `---
+title: Checkpointing
+created: 2026-07-20
+updated: 2026-07-20
+type: concept
+tags: [storage]
+sources: [raw/articles/write-ahead-logging.md]
+---
+
+# Checkpointing
+
+A checkpoint bounds recovery work.
+`
+  )
+  await writeFile(
     join(workspacePath, "index.md"),
-    "# Wiki Index\n\n## Concepts\n\n- [[write-ahead-logging]]\n"
+    "# Wiki Index\n\n## Concepts\n\n- [[checkpointing]]\n- [[write-ahead-logging]]\n"
   )
   await git(workspacePath, "add", "--all")
   await git(workspacePath, "commit", "-m", "Seed wiki")
@@ -263,12 +333,12 @@ The log supports recovery.
 }
 
 function fakeUpdateAgent(
-  mutate: (worktreePath: string) => Promise<void>
+  mutate: (worktreePath: string, prompt: string) => Promise<void>
 ): WikiUpdateAgentSession {
   return {
     name: "fake/update-agent",
     async prompt(input) {
-      await mutate(input.workspacePath)
+      await mutate(input.workspacePath, input.prompt)
       return {
         output: "Clarified the recovery ordering guarantee.",
         summary: "Clarify write-ahead log recovery ordering",
