@@ -13,6 +13,7 @@ import {
 import {
   Field,
   FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
 } from "@workspace/ui/components/field"
@@ -27,6 +28,7 @@ import {
 import { Spinner } from "@workspace/ui/components/spinner"
 import { Textarea } from "@workspace/ui/components/textarea"
 import { useState } from "react"
+import { Controller, useForm } from "react-hook-form"
 
 import { errorMessage } from "@/lib/amend-client"
 
@@ -34,6 +36,10 @@ const documentAccept = {
   "application/pdf": [".pdf"],
   "text/markdown": [".md", ".markdown"],
   "text/plain": [".txt", ".text"],
+}
+
+interface AddDocumentFormValues {
+  objective: string
 }
 
 export function WikiAddDocument({
@@ -48,16 +54,16 @@ export function WikiAddDocument({
   const [open, setOpen] = useState(false)
   const [document, setDocument] = useState<SourceDocumentSelection>()
   const [sourceFiles, setSourceFiles] = useState<File[]>()
-  const [objective, setObjective] = useState(() =>
-    defaultObjective(wiki.domain)
-  )
   const [busy, setBusy] = useState<"registering" | "starting">()
   const [error, setError] = useState<string>()
+  const form = useForm<AddDocumentFormValues>({
+    defaultValues: { objective: defaultObjective(wiki.domain) },
+  })
 
   function reset() {
     setDocument(undefined)
     setSourceFiles(undefined)
-    setObjective(defaultObjective(wiki.domain))
+    form.reset({ objective: defaultObjective(wiki.domain) })
     setBusy(undefined)
     setError(undefined)
   }
@@ -87,13 +93,8 @@ export function WikiAddDocument({
     }
   }
 
-  async function startIngest(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function startIngest({ objective }: AddDocumentFormValues) {
     if (!document) return
-    if (!objective.trim()) {
-      setError("Describe what Amend should preserve from this document.")
-      return
-    }
 
     setBusy("starting")
     setError(undefined)
@@ -127,7 +128,10 @@ export function WikiAddDocument({
       </Button>
       <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent side="right" showCloseButton={false}>
-          <form className="flex h-full flex-col" onSubmit={startIngest}>
+          <form
+            className="flex h-full flex-col"
+            onSubmit={form.handleSubmit(startIngest)}
+          >
             <SheetHeader>
               <SheetTitle>Add document</SheetTitle>
               <SheetDescription>
@@ -160,24 +164,42 @@ export function WikiAddDocument({
                   <DropzoneContent />
                 </Dropzone>
               </Field>
-              <Field data-disabled={busy !== undefined || undefined}>
-                <FieldLabel htmlFor="source-objective">
-                  What matters?
-                </FieldLabel>
-                <Textarea
-                  id="source-objective"
-                  value={objective}
-                  onChange={(event) => setObjective(event.target.value)}
-                  required
-                  maxLength={10000}
-                  rows={4}
-                  disabled={busy !== undefined}
-                />
-                <FieldDescription>
-                  Refine the default guidance if this source needs special
-                  focus.
-                </FieldDescription>
-              </Field>
+              <Controller
+                name="objective"
+                control={form.control}
+                rules={{
+                  required:
+                    "Describe what Amend should preserve from this document.",
+                  validate: (value) =>
+                    value.trim().length > 0 ||
+                    "Describe what Amend should preserve from this document.",
+                }}
+                render={({ field, fieldState }) => (
+                  <Field
+                    data-disabled={busy !== undefined || undefined}
+                    data-invalid={fieldState.invalid || undefined}
+                  >
+                    <FieldLabel htmlFor="source-objective">
+                      What matters?
+                    </FieldLabel>
+                    <Textarea
+                      {...field}
+                      id="source-objective"
+                      aria-invalid={fieldState.invalid}
+                      maxLength={10000}
+                      rows={4}
+                      disabled={busy !== undefined}
+                    />
+                    <FieldDescription>
+                      Refine the default guidance if this source needs special
+                      focus.
+                    </FieldDescription>
+                    {fieldState.invalid ? (
+                      <FieldError errors={[fieldState.error]} />
+                    ) : null}
+                  </Field>
+                )}
+              />
               {error ? (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>

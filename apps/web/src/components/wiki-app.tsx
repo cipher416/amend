@@ -25,6 +25,7 @@ import { ThemeProvider } from "./theme"
 import { WikiFileSearch } from "./wiki-file-search"
 import { parseMarkdownDocument, WikiFileViewer } from "./wiki-file-viewer"
 import { WikiSession, useWikiSession } from "./wiki-session"
+import type { WikiBusy } from "./wiki-session"
 import { WikiSidebar } from "./wiki-sidebar"
 import { WorkflowError } from "./wiki-workflow-ui"
 
@@ -32,7 +33,7 @@ interface WikiViewContextValue {
   desktop: AmendApi
   wiki: WikiSummary
   files: readonly WikiFileTreeItem[]
-  busy: import("./wiki-session").WikiBusy
+  busy: WikiBusy
   error?: string
 }
 
@@ -215,7 +216,7 @@ function WikiMain({
   wiki: WikiSummary
   files: readonly WikiFileTreeItem[]
   selectedFile?: WikiFileContent
-  busy: import("./wiki-session").WikiBusy
+  busy: WikiBusy
   error?: string
 }) {
   const contentRef = useRef<HTMLDivElement>(null)

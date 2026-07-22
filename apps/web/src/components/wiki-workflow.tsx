@@ -31,6 +31,7 @@ import {
 
 import { PiConnectStep } from "./pi-connect-step"
 import { WikiReadyStep } from "./wiki-ready-step"
+import type { WikiSetupFormValues } from "./wiki-setup-step"
 import { WikiSetupStep } from "./wiki-setup-step"
 import { WorkflowShell } from "./wiki-workflow-ui"
 
@@ -67,13 +68,13 @@ interface WorkflowStepViewProps {
   onChooseHome: () => void
   onRegisterDocument: (file: File) => void
   onDocumentError: (message: string) => void
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
+  onSubmit: (values: WikiSetupFormValues) => void
 }
 
 interface WorkflowActions {
   chooseHome: () => Promise<void>
   registerDocument: (file: File) => Promise<void>
-  createWiki: (event: React.FormEvent<HTMLFormElement>) => Promise<void>
+  createWiki: (values: WikiSetupFormValues) => Promise<void>
   retryIndex: () => Promise<void>
   changeField: (field: EditableField, value: string) => void
 }
@@ -234,7 +235,7 @@ export function WikiWorkflow({
       onDocumentError={(message) =>
         dispatch({ type: "operation-failed", message })
       }
-      onSubmit={(event) => void actions.createWiki(event)}
+      onSubmit={(values) => void actions.createWiki(values)}
       home={home}
     />
   )
@@ -252,10 +253,10 @@ function useWikiWorkflowActions({
     chooseHome: async () => {
       dispatch({ type: "operation-started", operation: "home" })
       try {
-        const home = await chooseWikiHome(api)
-        if (home) {
-          queryClient.setQueryData(wikiHomeKey, home)
-          dispatch({ type: "home-selected", home })
+        const selectedHome = await chooseWikiHome(api)
+        if (selectedHome) {
+          queryClient.setQueryData(wikiHomeKey, selectedHome)
+          dispatch({ type: "home-selected", home: selectedHome })
         } else {
           dispatch({ type: "operation-finished" })
         }
@@ -283,8 +284,10 @@ function useWikiWorkflowActions({
         dispatch({ type: "operation-failed", message: errorMessage(cause) })
       }
     },
-    createWiki: async (event) => {
-      event.preventDefault()
+    createWiki: async ({
+      wikiName: submittedWikiName,
+      focus: submittedFocus,
+    }) => {
       if (!state.document) {
         dispatch({
           type: "operation-failed",
@@ -293,8 +296,8 @@ function useWikiWorkflowActions({
         return
       }
 
-      const wikiName = state.wikiName.trim()
-      const focus = state.focus.trim()
+      const wikiName = submittedWikiName.trim()
+      const focus = submittedFocus.trim()
 
       let targetWiki = wiki
       if (!targetWiki) {

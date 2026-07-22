@@ -18,12 +18,14 @@ import {
 import {
   Field,
   FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
 import { Spinner } from "@workspace/ui/components/spinner"
 import { Textarea } from "@workspace/ui/components/textarea"
+import { Controller, useForm } from "react-hook-form"
 
 import { WorkflowError } from "./wiki-workflow-ui"
 
@@ -31,6 +33,11 @@ const documentAccept = {
   "application/pdf": [".pdf"],
   "text/markdown": [".md", ".markdown"],
   "text/plain": [".txt", ".text"],
+}
+
+export interface WikiSetupFormValues {
+  wikiName: string
+  focus: string
 }
 
 export function WikiSetupStep({
@@ -64,8 +71,12 @@ export function WikiSetupStep({
   onChooseHome: () => void
   onRegisterDocument: (file: File) => void
   onDocumentError: (message: string) => void
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
+  onSubmit: (values: WikiSetupFormValues) => void
 }) {
+  const form = useForm<WikiSetupFormValues>({
+    values: { wikiName: wiki?.name ?? wikiName, focus },
+  })
+
   if (job?.status === "running") {
     return (
       <section
@@ -99,7 +110,7 @@ export function WikiSetupStep({
   const sourceReady = wikiLocked || Boolean(home)
 
   return (
-    <form className="py-2 sm:py-4" onSubmit={onSubmit}>
+    <form className="py-2 sm:py-4" onSubmit={form.handleSubmit(onSubmit)}>
       <header className="mb-8 max-w-xl">
         <h1 className="font-heading text-3xl font-medium tracking-tight">
           Create your wiki
@@ -170,41 +181,72 @@ export function WikiSetupStep({
 
         {document ? (
           <>
-            <Field data-disabled={wikiLocked || undefined}>
-              <FieldLabel htmlFor="wiki-name">Wiki name</FieldLabel>
-              <Input
-                id="wiki-name"
-                name="wiki-name"
-                autoComplete="off"
-                value={wiki?.name ?? wikiName}
-                onChange={(event) =>
-                  onFieldChange("wikiName", event.target.value)
-                }
-                placeholder="Reliability research"
-                required
-                maxLength={80}
-                disabled={wikiLocked}
-              />
-            </Field>
+            <Controller
+              name="wikiName"
+              control={form.control}
+              rules={
+                wikiLocked
+                  ? undefined
+                  : {
+                      required: "Enter a name for this wiki.",
+                      validate: (value) =>
+                        value.trim().length > 0 ||
+                        "Enter a name for this wiki.",
+                    }
+              }
+              render={({ field, fieldState }) => (
+                <Field
+                  data-disabled={wikiLocked || undefined}
+                  data-invalid={fieldState.invalid || undefined}
+                >
+                  <FieldLabel htmlFor="wiki-name">Wiki name</FieldLabel>
+                  <Input
+                    {...field}
+                    id="wiki-name"
+                    autoComplete="off"
+                    aria-invalid={fieldState.invalid}
+                    onChange={(event) => {
+                      field.onChange(event)
+                      onFieldChange("wikiName", event.target.value)
+                    }}
+                    placeholder="Reliability research"
+                    maxLength={80}
+                    disabled={wikiLocked}
+                  />
+                  {fieldState.invalid ? (
+                    <FieldError errors={[fieldState.error]} />
+                  ) : null}
+                </Field>
+              )}
+            />
 
-            <Field>
-              <FieldLabel htmlFor="wiki-focus">
-                What should Amend focus on? (optional)
-              </FieldLabel>
-              <Textarea
-                id="wiki-focus"
-                name="wiki-focus"
-                autoComplete="off"
-                value={focus}
-                onChange={(event) => onFieldChange("focus", event.target.value)}
-                placeholder="Recovery ordering and replication tradeoffs"
-                maxLength={2000}
-                rows={3}
-              />
-              <FieldDescription>
-                Guide what Amend should preserve and connect.
-              </FieldDescription>
-            </Field>
+            <Controller
+              name="focus"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <Field data-invalid={fieldState.invalid || undefined}>
+                  <FieldLabel htmlFor="wiki-focus">
+                    What should Amend focus on? (optional)
+                  </FieldLabel>
+                  <Textarea
+                    {...field}
+                    id="wiki-focus"
+                    autoComplete="off"
+                    aria-invalid={fieldState.invalid}
+                    onChange={(event) => {
+                      field.onChange(event)
+                      onFieldChange("focus", event.target.value)
+                    }}
+                    placeholder="Recovery ordering and replication tradeoffs"
+                    maxLength={2000}
+                    rows={3}
+                  />
+                  <FieldDescription>
+                    Guide what Amend should preserve and connect.
+                  </FieldDescription>
+                </Field>
+              )}
+            />
           </>
         ) : null}
 
@@ -221,9 +263,7 @@ export function WikiSetupStep({
         <Button
           type="submit"
           size="lg"
-          disabled={
-            busy || !document || (!wikiLocked && (!home || !wikiName.trim()))
-          }
+          disabled={busy || !document || (!wikiLocked && !home)}
         >
           {submitting ? <Spinner data-icon="inline-start" /> : null}
           {submitting ? "Building" : "Build wiki"}

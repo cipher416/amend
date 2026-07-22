@@ -6,6 +6,7 @@ import type { AmendApi, AmendResult } from "@workspace/contract"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { SettingsMenu } from "./settings-menu"
 import { ThemeProvider } from "./theme"
 
 vi.mock("@workspace/ui/components/dialog", () => ({
@@ -38,8 +39,6 @@ vi.mock("./pi-connect-step", () => ({
     </button>
   ),
 }))
-
-import { SettingsMenu } from "./settings-menu"
 
 describe("settings menu", () => {
   beforeEach(() => {

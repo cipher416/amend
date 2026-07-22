@@ -20,12 +20,14 @@ import {
 import {
   Field,
   FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
 import { Separator } from "@workspace/ui/components/separator"
 import { Spinner } from "@workspace/ui/components/spinner"
+import { Controller, useForm } from "react-hook-form"
 
 import { errorMessage } from "@/lib/amend-client"
 
@@ -51,10 +53,7 @@ interface ConnectState {
   authInstructions?: string
   statusMessage?: string
   prompt?: { promptId: string; message: string; placeholder?: string }
-  promptValue: string
   apiKeyProviders?: readonly PiProviderSummary[]
-  apiKeyProvider?: string
-  apiKeyValue: string
   models?: readonly PiModelSummary[]
   selectedModel?: string
 }
@@ -63,15 +62,12 @@ type ConnectAction =
   | { type: "oauth-started"; provider: string; loginId: string }
   | { type: "login-event"; event: PiLoginEvent }
   | { type: "switch-to-api-key"; providers: readonly PiProviderSummary[] }
-  | { type: "api-key-provider-changed"; provider: string }
-  | { type: "api-key-value-changed"; value: string }
   | {
       type: "api-key-saved"
       provider: string
       models: readonly PiModelSummary[]
     }
   | { type: "models-loaded"; models: readonly PiModelSummary[] }
-  | { type: "prompt-value-changed"; value: string }
   | { type: "prompt-submitted" }
   | { type: "model-selected"; model: string }
   | { type: "busy-started" }
@@ -82,8 +78,15 @@ type ConnectAction =
 const initialState: ConnectState = {
   phase: "choose",
   busy: false,
-  promptValue: "",
-  apiKeyValue: "",
+}
+
+interface OAuthPromptFormValues {
+  value: string
+}
+
+interface ApiKeyFormValues {
+  provider: string
+  apiKey: string
 }
 
 export function PiConnectStep({
@@ -154,14 +157,14 @@ export function PiConnectStep({
     }
   }
 
-  async function submitPrompt() {
+  async function submitPrompt({ value }: OAuthPromptFormValues) {
     if (!state.loginId || !state.prompt) return
     dispatch({ type: "busy-started" })
     try {
       const response = await api.providers.respondToOAuthPrompt({
         loginId: state.loginId,
         promptId: state.prompt.promptId,
-        value: state.promptValue,
+        value,
       })
       if (!response.ok) {
         dispatch({ type: "error", message: response.error.message })
@@ -187,21 +190,19 @@ export function PiConnectStep({
     }
   }
 
-  async function saveApiKey(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!state.apiKeyProvider || !state.apiKeyValue.trim()) return
+  async function saveApiKey({ provider, apiKey }: ApiKeyFormValues) {
     dispatch({ type: "busy-started" })
     try {
       const saveResponse = await api.providers.connectWithApiKey({
-        provider: state.apiKeyProvider,
-        apiKey: state.apiKeyValue.trim(),
+        provider,
+        apiKey: apiKey.trim(),
       })
       if (!saveResponse.ok) {
         dispatch({ type: "error", message: saveResponse.error.message })
         return
       }
       const modelsResponse = await api.providers.listModels({
-        provider: state.apiKeyProvider,
+        provider,
       })
       if (!modelsResponse.ok) {
         dispatch({ type: "error", message: modelsResponse.error.message })
@@ -209,7 +210,7 @@ export function PiConnectStep({
       }
       dispatch({
         type: "api-key-saved",
-        provider: state.apiKeyProvider,
+        provider,
         models: modelsResponse.value,
       })
     } catch (cause) {
@@ -262,10 +263,7 @@ export function PiConnectStep({
         {state.phase === "login" ? (
           <OAuthLoginStep
             state={state}
-            onPromptChange={(value) =>
-              dispatch({ type: "prompt-value-changed", value })
-            }
-            onSubmitPrompt={() => void submitPrompt()}
+            onSubmitPrompt={(values) => void submitPrompt(values)}
             onCancel={() => void cancelOAuth()}
           />
         ) : null}
@@ -273,13 +271,7 @@ export function PiConnectStep({
         {state.phase === "api-key" ? (
           <ApiKeyStep
             state={state}
-            onSubmit={saveApiKey}
-            onProviderChange={(provider) =>
-              dispatch({ type: "api-key-provider-changed", provider })
-            }
-            onApiKeyChange={(value) =>
-              dispatch({ type: "api-key-value-changed", value })
-            }
+            onSubmit={(values) => void saveApiKey(values)}
             onBack={() => dispatch({ type: "back-to-choose" })}
           />
         ) : null}
@@ -343,15 +335,22 @@ function ChooseProviderStep({
 
 function OAuthLoginStep({
   state,
-  onPromptChange,
   onSubmitPrompt,
   onCancel,
 }: {
   state: ConnectState
-  onPromptChange: (value: string) => void
-  onSubmitPrompt: () => void
+  onSubmitPrompt: (values: OAuthPromptFormValues) => void
   onCancel: () => void
 }) {
+  const form = useForm<OAuthPromptFormValues>({
+    defaultValues: { value: "" },
+  })
+  const prompt = state.prompt
+
+  useEffect(() => {
+    form.reset({ value: "" })
+  }, [form, prompt?.promptId])
+
   return (
     <div
       className="flex flex-col gap-4 border-y py-5"
@@ -381,28 +380,43 @@ function OAuthLoginStep({
         </div>
       </div>
 
-      {state.prompt ? (
-        <Field>
-          <FieldLabel htmlFor="pi-login-prompt">
-            {state.prompt.message}
-          </FieldLabel>
-          <Input
-            id="pi-login-prompt"
-            value={state.promptValue}
-            placeholder={state.prompt.placeholder}
-            onChange={(event) => onPromptChange(event.target.value)}
-          />
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              size="sm"
-              disabled={state.busy || !state.promptValue.trim()}
-              onClick={onSubmitPrompt}
-            >
-              Submit
-            </Button>
-          </div>
-        </Field>
+      {prompt ? (
+        <form onSubmit={form.handleSubmit(onSubmitPrompt)}>
+          <FieldGroup>
+            <Controller
+              name="value"
+              control={form.control}
+              rules={{
+                required: "Enter a response before submitting.",
+                validate: (value) =>
+                  value.trim().length > 0 ||
+                  "Enter a response before submitting.",
+              }}
+              render={({ field, fieldState }) => (
+                <Field data-invalid={fieldState.invalid || undefined}>
+                  <FieldLabel htmlFor="pi-login-prompt">
+                    {prompt.message}
+                  </FieldLabel>
+                  <Input
+                    {...field}
+                    id="pi-login-prompt"
+                    placeholder={prompt.placeholder}
+                    disabled={state.busy}
+                    aria-invalid={fieldState.invalid}
+                  />
+                  {fieldState.invalid ? (
+                    <FieldError errors={[fieldState.error]} />
+                  ) : null}
+                  <div className="flex justify-end">
+                    <Button type="submit" size="sm" disabled={state.busy}>
+                      Submit
+                    </Button>
+                  </div>
+                </Field>
+              )}
+            />
+          </FieldGroup>
+        </form>
       ) : null}
 
       <div className="flex justify-end">
@@ -417,41 +431,70 @@ function OAuthLoginStep({
 function ApiKeyStep({
   state,
   onSubmit,
-  onProviderChange,
-  onApiKeyChange,
   onBack,
 }: {
   state: ConnectState
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
-  onProviderChange: (provider: string) => void
-  onApiKeyChange: (value: string) => void
+  onSubmit: (values: ApiKeyFormValues) => void
   onBack: () => void
 }) {
-  return (
-    <form className="flex flex-col gap-4" onSubmit={onSubmit}>
-      <Field>
-        <FieldLabel htmlFor="pi-api-key-provider">Provider</FieldLabel>
-        <ProviderPicker
-          providers={state.apiKeyProviders ?? []}
-          value={state.apiKeyProvider ?? ""}
-          disabled={state.busy}
-          onChange={onProviderChange}
-        />
-      </Field>
+  const form = useForm<ApiKeyFormValues>({
+    defaultValues: { provider: "", apiKey: "" },
+  })
 
-      <Field>
-        <FieldLabel htmlFor="pi-api-key-value">API key</FieldLabel>
-        <Input
-          id="pi-api-key-value"
-          type="password"
-          value={state.apiKeyValue}
-          onChange={(event) => onApiKeyChange(event.target.value)}
-          required
+  return (
+    <form
+      className="flex flex-col gap-4"
+      onSubmit={form.handleSubmit(onSubmit)}
+    >
+      <FieldGroup>
+        <Controller
+          name="provider"
+          control={form.control}
+          rules={{ required: "Choose a provider." }}
+          render={({ field, fieldState }) => (
+            <Field data-invalid={fieldState.invalid || undefined}>
+              <FieldLabel htmlFor="pi-api-key-provider">Provider</FieldLabel>
+              <ProviderPicker
+                providers={state.apiKeyProviders ?? []}
+                value={field.value}
+                disabled={state.busy}
+                ariaInvalid={fieldState.invalid}
+                onChange={field.onChange}
+              />
+              {fieldState.invalid ? (
+                <FieldError errors={[fieldState.error]} />
+              ) : null}
+            </Field>
+          )}
         />
-        <FieldDescription>
-          Stored locally and used only to reach this provider's API.
-        </FieldDescription>
-      </Field>
+
+        <Controller
+          name="apiKey"
+          control={form.control}
+          rules={{
+            required: "Enter an API key.",
+            validate: (value) => value.trim().length > 0 || "Enter an API key.",
+          }}
+          render={({ field, fieldState }) => (
+            <Field data-invalid={fieldState.invalid || undefined}>
+              <FieldLabel htmlFor="pi-api-key-value">API key</FieldLabel>
+              <Input
+                {...field}
+                id="pi-api-key-value"
+                type="password"
+                disabled={state.busy}
+                aria-invalid={fieldState.invalid}
+              />
+              <FieldDescription>
+                Stored locally and used only to reach this provider's API.
+              </FieldDescription>
+              {fieldState.invalid ? (
+                <FieldError errors={[fieldState.error]} />
+              ) : null}
+            </Field>
+          )}
+        />
+      </FieldGroup>
 
       <div className="flex justify-between">
         <Button
@@ -462,12 +505,7 @@ function ApiKeyStep({
         >
           Back
         </Button>
-        <Button
-          type="submit"
-          disabled={
-            state.busy || !state.apiKeyProvider || !state.apiKeyValue.trim()
-          }
-        >
+        <Button type="submit" disabled={state.busy}>
           {state.busy ? <Spinner data-icon="inline-start" /> : null}
           Save and continue
         </Button>
@@ -545,11 +583,13 @@ function ProviderPicker({
   providers,
   value,
   disabled,
+  ariaInvalid,
   onChange,
 }: {
   providers: readonly PiProviderSummary[]
   value: string
   disabled: boolean
+  ariaInvalid: boolean
   onChange: (provider: string) => void
 }) {
   return (
@@ -562,6 +602,7 @@ function ProviderPicker({
       options={providers}
       value={value}
       disabled={disabled}
+      ariaInvalid={ariaInvalid}
       onChange={onChange}
     />
   )
@@ -578,6 +619,7 @@ function CommandPicker({
   options,
   value,
   disabled,
+  ariaInvalid = false,
   onChange,
 }: {
   id: string
@@ -588,6 +630,7 @@ function CommandPicker({
   options: readonly PickerOption[]
   value?: string
   disabled: boolean
+  ariaInvalid?: boolean
   onChange: (value: string) => void
 }) {
   const selected = options.find((option) => option.id === value) ?? null
@@ -612,6 +655,7 @@ function CommandPicker({
             type="button"
             variant="outline"
             aria-label={label}
+            aria-invalid={ariaInvalid}
             className="w-full justify-between font-normal"
           />
         }
@@ -650,7 +694,6 @@ function connectReducer(
         authInstructions: undefined,
         statusMessage: undefined,
         prompt: undefined,
-        promptValue: "",
       }
     case "login-event": {
       if (action.event.loginId !== state.loginId) return state
@@ -674,7 +717,6 @@ function connectReducer(
               message: event.message,
               placeholder: event.placeholder,
             },
-            promptValue: "",
           }
         case "completed":
           return {
@@ -713,10 +755,6 @@ function connectReducer(
         error: undefined,
         apiKeyProviders: action.providers,
       }
-    case "api-key-provider-changed":
-      return { ...state, apiKeyProvider: action.provider }
-    case "api-key-value-changed":
-      return { ...state, apiKeyValue: action.value }
     case "api-key-saved":
       return {
         ...state,
@@ -732,14 +770,11 @@ function connectReducer(
         busy: false,
         models: action.models,
       }
-    case "prompt-value-changed":
-      return { ...state, promptValue: action.value }
     case "prompt-submitted":
       return {
         ...state,
         busy: false,
         prompt: undefined,
-        promptValue: "",
         statusMessage: "Finishing up",
       }
     case "model-selected":

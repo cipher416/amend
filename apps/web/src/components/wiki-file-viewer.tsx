@@ -1,7 +1,8 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import type { WikiFileContent, WikiFileTreeItem } from "@workspace/contract"
 import { AnchorProvider, ScrollProvider, TOCItem } from "fumadocs-core/toc"
-import { useRef, type JSX } from "react"
+import { useRef } from "react"
+import type { JSX } from "react"
 import type { Components } from "streamdown"
 import { defaultRehypePlugins, Streamdown } from "streamdown"
 
