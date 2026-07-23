@@ -188,3 +188,10 @@ content. They are separate from the deterministic `pnpm test` suite.
 Amend is currently an early-stage desktop application. File formats, wiki
 schema, provider support, and packaging may change while the core workflow is
 being developed.
+
+## Acknowledgements
+
+Amend's wiki-maintenance workflow is adapted from Hermes Agent's MIT-licensed
+[`llm-wiki` skill](https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/research/research-llm-wiki),
+itself based on Andrej Karpathy's LLM Wiki pattern. Amend adapts the workflow
+to its local desktop, validation, and Git-based review model.
