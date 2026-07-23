@@ -35,6 +35,7 @@ import type {
   CancelIngestInput,
   ContinueWikiUpdateInput,
   CreateWikiInput,
+  DeleteWikiInput,
   IngestDocumentInput,
   PiCancelLoginInput,
   PiListModelsInput,
@@ -69,6 +70,8 @@ const wikis = Object.freeze({
     invoke(amendChannels.activateWiki, isWikiSummary, input),
   rename: (input: RenameWikiInput) =>
     invoke(amendChannels.renameWiki, isWikiSummary, input),
+  delete: (input: DeleteWikiInput) =>
+    invoke(amendChannels.deleteWiki, isWikiSummaryOrNull, input),
 })
 
 const appearance = Object.freeze({

@@ -17,6 +17,7 @@ import type {
   CancelIngestInput,
   ContinueWikiUpdateInput,
   CreateWikiInput,
+  DeleteWikiInput,
   IngestDocumentInput,
   IngestPastedSourceResult,
   RenameWikiInput,
@@ -116,6 +117,7 @@ interface WikiServiceOptions {
     databasePath: string
   }) => Promise<WikiIndex>
   readWiki?: (input: { wikiPath: string }) => Promise<Wiki>
+  moveToTrash?: (wikiPath: string) => Promise<void>
 }
 
 export class WikiServiceError extends Error {
@@ -376,6 +378,85 @@ export class WikiService {
           { cause: error }
         )
       }
+    })
+    this.lifecycleOperation = operation
+    try {
+      return await operation
+    } finally {
+      if (this.lifecycleOperation === operation) {
+        this.lifecycleOperation = undefined
+      }
+    }
+  }
+
+  async deleteWiki(input: DeleteWikiInput): Promise<WikiSummary | null> {
+    this.assertOpen()
+    if (this.lifecycleOperation) {
+      throw new WikiServiceError("busy", "Amend is already working.")
+    }
+    const operation = Promise.resolve().then(async () => {
+      const home = await this.home.read()
+      if (!home) {
+        throw new WikiServiceError(
+          "invalid-location",
+          "Choose an Amend home before deleting a wiki."
+        )
+      }
+      const record = (await this.discoverWikis()).find(
+        ({ id }) => id === input.wikiId
+      )
+      if (!record) {
+        throw new WikiServiceError("invalid-input", "The wiki was not found.")
+      }
+      if (!isPathInside(home.wikiDirectory, record.path)) {
+        throw new WikiServiceError(
+          "invalid-location",
+          "The wiki is outside the Amend home."
+        )
+      }
+      if (this.jobs.get(input.wikiId)?.status === "running") {
+        throw new WikiServiceError(
+          "busy",
+          "Wait for the wiki ingest to finish before deleting it."
+        )
+      }
+      if (this.updates.has(input.wikiId)) {
+        throw new WikiServiceError(
+          "busy",
+          "Finish or discard the wiki update before deleting it."
+        )
+      }
+      const moveToTrash = this.options.moveToTrash
+      if (!moveToTrash) {
+        throw new WikiServiceError(
+          "operation-failed",
+          "Moving a wiki to Trash is unavailable."
+        )
+      }
+
+      const wasActive = this.active?.summary.id === input.wikiId
+      try {
+        await moveToTrash(record.path)
+      } catch (error) {
+        throw new WikiServiceError(
+          "operation-failed",
+          "The wiki could not be moved to Trash.",
+          { cause: error }
+        )
+      }
+
+      const context = this.contexts.get(input.wikiId)
+      if (context) await this.closeWikiContext(input.wikiId, context)
+      this.jobs.delete(input.wikiId)
+      this.updates.delete(input.wikiId)
+      await this.removeWikiIndex(input.wikiId)
+
+      if (!wasActive) return this.active?.summary ?? null
+      const next = (await this.discoverWikis()).at(0)
+      if (next) return await this.openAndActivateWiki(next.path, next.id)
+      this.active = undefined
+      await this.home.setLastActiveWikiId(null)
+      return null
     })
     this.lifecycleOperation = operation
     try {
@@ -1188,6 +1269,17 @@ export class WikiService {
     if (this.active === context) this.active = undefined
     await context.index.close().catch((error: unknown) => {
       console.error("[amend] failed to close a replaced wiki index:", error)
+    })
+  }
+
+  private async removeWikiIndex(wikiId: string): Promise<void> {
+    const databasePath = indexPath(this.options.userDataPath, wikiId)
+    await Promise.all(
+      [databasePath, `${databasePath}-shm`, `${databasePath}-wal`].map((path) =>
+        rm(path, { force: true })
+      )
+    ).catch((error: unknown) => {
+      console.error("[amend] failed to remove a deleted wiki index:", error)
     })
   }
 

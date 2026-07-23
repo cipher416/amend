@@ -6,6 +6,7 @@ export const amendChannels = Object.freeze({
   listWikis: "amend:wikis:list",
   activateWiki: "amend:wikis:activate",
   renameWiki: "amend:wikis:rename",
+  deleteWiki: "amend:wikis:delete",
   setAppearanceTheme: "amend:appearance:set-theme",
   getProviderStatus: "amend:providers:status",
   listProviders: "amend:providers:list",

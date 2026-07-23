@@ -117,6 +117,7 @@ app.whenReady().then(async () => {
   nativeTheme.themeSource = "system"
   wikiService = new WikiService({
     userDataPath: app.getPath("userData"),
+    moveToTrash: async (wikiPath) => await shell.trashItem(wikiPath),
     skillPath: resolveWikiSkillPath({
       isPackaged: app.isPackaged,
       appPath: app.getAppPath(),

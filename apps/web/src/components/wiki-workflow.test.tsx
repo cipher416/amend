@@ -566,6 +566,7 @@ function createDesktopApi(
           displayPath: `/research/${name}`,
         })
       ),
+      delete: vi.fn(async () => success(wiki)),
     },
     wiki: {
       chooseDocument: vi.fn(async () =>

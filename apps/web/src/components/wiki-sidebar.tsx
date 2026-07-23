@@ -78,7 +78,7 @@ export function WikiSidebar({
   switching,
   loadingFiles,
   running,
-  renameBlocked,
+  wikiActionsBlocked,
 }: {
   desktop: AmendApi
   wiki: WikiSummary
@@ -88,7 +88,7 @@ export function WikiSidebar({
   switching: boolean
   loadingFiles: boolean
   running: boolean
-  renameBlocked: boolean
+  wikiActionsBlocked: boolean
 }) {
   return (
     <>
@@ -98,7 +98,7 @@ export function WikiSidebar({
           wiki={wiki}
           wikis={wikis}
           switching={switching}
-          renameBlocked={renameBlocked}
+          wikiActionsBlocked={wikiActionsBlocked}
         />
         <WikiSearch desktop={desktop} wiki={wiki} />
         <WikiAddDocument
@@ -143,16 +143,17 @@ function WikiPicker({
   wiki,
   wikis,
   switching,
-  renameBlocked,
+  wikiActionsBlocked,
 }: {
   desktop: AmendApi
   wiki: WikiSummary
   wikis: readonly WikiListItem[]
   switching: boolean
-  renameBlocked: boolean
+  wikiActionsBlocked: boolean
 }) {
   const navigate = useNavigate()
   const [renameOpen, setRenameOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   return (
     <>
@@ -198,11 +199,19 @@ function WikiPicker({
           </DropdownMenuRadioGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            disabled={renameBlocked}
+            disabled={wikiActionsBlocked}
             onClick={() => setRenameOpen(true)}
           >
             Rename wiki
           </DropdownMenuItem>
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={wikiActionsBlocked}
+            onClick={() => setDeleteOpen(true)}
+          >
+            Move wiki to Trash
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() =>
               void navigate({ to: "/", search: { createWiki: true } })
@@ -218,7 +227,123 @@ function WikiPicker({
         open={renameOpen}
         onOpenChange={setRenameOpen}
       />
+      <DeleteWikiDialog
+        desktop={desktop}
+        wiki={wiki}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+      />
     </>
+  )
+}
+
+function DeleteWikiDialog({
+  desktop,
+  wiki,
+  open,
+  onOpenChange,
+}: {
+  desktop: AmendApi
+  wiki: WikiSummary
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const navigate = useNavigate()
+  const queryClient = useRouter().options.context.queryClient
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string>()
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (submitting && !nextOpen) return
+    onOpenChange(nextOpen)
+    if (nextOpen) setError(undefined)
+  }
+
+  async function handleDelete() {
+    if (submitting) return
+    setSubmitting(true)
+    setError(undefined)
+    try {
+      const response = await desktop.wikis.delete({ wikiId: wiki.id })
+      if (!response.ok) {
+        setError(response.error.message)
+        return
+      }
+      const activeWiki = response.value
+      if (activeWiki) {
+        await navigate({
+          to: "/wiki/$wikiId",
+          params: { wikiId: activeWiki.id },
+          replace: true,
+        })
+      } else {
+        await navigate({
+          to: "/",
+          search: { createWiki: false },
+          replace: true,
+        })
+      }
+      queryClient.setQueryData(wikiCurrentKey, activeWiki)
+      queryClient.setQueryData<readonly WikiListItem[]>(wikisKey, (items) =>
+        items
+          ?.filter((item) => item.id !== wiki.id)
+          .map((item) => ({
+            ...item,
+            active: item.id === activeWiki?.id,
+          }))
+      )
+      queryClient.removeQueries({ queryKey: ["wiki", wiki.id] })
+      void queryClient.invalidateQueries({ queryKey: wikisKey })
+      onOpenChange(false)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Move wiki to Trash?</DialogTitle>
+          <DialogDescription>
+            The wiki and its Git history will be moved to your operating
+            system&apos;s Trash.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-1 rounded-md bg-muted/50 p-3">
+          <span className="font-medium">{wiki.name}</span>
+          <span className="text-xs break-all text-muted-foreground">
+            {wiki.displayPath}
+          </span>
+        </div>
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={submitting}
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={submitting}
+            onClick={() => void handleDelete()}
+          >
+            {submitting ? <Spinner data-icon="inline-start" /> : null}
+            Move to Trash
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

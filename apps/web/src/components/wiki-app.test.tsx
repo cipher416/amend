@@ -19,6 +19,8 @@ import { useState } from "react"
 import type { ButtonHTMLAttributes, ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { wikiCurrentKey, wikisKey } from "@/lib/wiki-queries"
+
 import { WikiApp, WikiFileContent } from "./wiki-app"
 
 const routeHarness = vi.hoisted(() => ({
@@ -30,6 +32,7 @@ const routeHarness = vi.hoisted(() => ({
     | undefined
     | ((wikiId: string, filePath?: string) => void),
   creatingWiki: false,
+  atHome: false,
 }))
 
 interface MockRouteParams {
@@ -71,6 +74,10 @@ vi.mock("@tanstack/react-router", () => ({
     }) => {
       if (to === "/" && search?.createWiki) {
         routeHarness.creatingWiki = true
+        return
+      }
+      if (to === "/") {
+        routeHarness.atHome = true
         return
       }
       if (params?.wikiId) {
@@ -222,6 +229,7 @@ afterEach(() => {
   routeHarness.renderOutlet = undefined
   routeHarness.navigate = undefined
   routeHarness.creatingWiki = false
+  routeHarness.atHome = false
 })
 
 describe("wiki app", () => {
@@ -472,6 +480,135 @@ describe("wiki app", () => {
     await waitFor(() => expect(api.wikis.list).toHaveBeenCalledTimes(2))
   })
 
+  it("confirms moving the current wiki to Trash", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Move wiki to Trash" })
+    )
+    expect(
+      screen.getByRole("heading", { name: "Move wiki to Trash?" })
+    ).toBeTruthy()
+    expect(screen.getAllByText(wikiSummary.name).length).toBeGreaterThan(0)
+    expect(screen.getByText(wikiSummary.displayPath)).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(
+      screen.queryByRole("heading", { name: "Move wiki to Trash?" })
+    ).toBeNull()
+    expect(api.wikis.delete).not.toHaveBeenCalled()
+  })
+
+  it("moves the current wiki to Trash and navigates to the next wiki", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Move wiki to Trash" })
+    )
+    await user.click(screen.getByRole("button", { name: "Move to Trash" }))
+
+    await waitFor(() =>
+      expect(api.wikis.delete).toHaveBeenCalledWith({ wikiId: wikiSummary.id })
+    )
+    await waitFor(() => expect(routeHarness.wikiId).toBe(archiveWikiSummary.id))
+    await waitFor(() =>
+      expect(routeHarness.queryClient?.getQueryData(wikiCurrentKey)).toEqual(
+        archiveWikiSummary
+      )
+    )
+    expect(routeHarness.queryClient?.getQueryData(wikisKey)).toEqual([
+      {
+        id: archiveWikiSummary.id,
+        name: archiveWikiSummary.name,
+        displayPath: archiveWikiSummary.displayPath,
+        active: true,
+        running: true,
+      },
+    ])
+  })
+
+  it("returns home after moving the final wiki to Trash", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    api.wikis.delete = vi.fn(async () => success(null))
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Move wiki to Trash" })
+    )
+    await user.click(screen.getByRole("button", { name: "Move to Trash" }))
+
+    await waitFor(() => expect(routeHarness.atHome).toBe(true))
+  })
+
+  it("keeps the Trash dialog open when deletion fails", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    api.wikis.delete = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: "operation-failed" as const,
+        message: "The wiki could not be moved to Trash.",
+      },
+    }))
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Move wiki to Trash" })
+    )
+    await user.click(screen.getByRole("button", { name: "Move to Trash" }))
+
+    expect(
+      await screen.findByText("The wiki could not be moved to Trash.")
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("heading", { name: "Move wiki to Trash?" })
+    ).toBeTruthy()
+  })
+
+  it("disables the Trash dialog while deletion is pending", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    let resolveDelete:
+      | ((result: AmendResult<WikiSummary | null>) => void)
+      | undefined
+    api.wikis.delete = vi.fn(
+      async () =>
+        await new Promise<AmendResult<WikiSummary | null>>((resolve) => {
+          resolveDelete = resolve
+        })
+    )
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Move wiki to Trash" })
+    )
+    const moveToTrash = screen.getByRole("button", { name: "Move to Trash" })
+    await user.click(moveToTrash)
+
+    await waitFor(() => expect(moveToTrash.hasAttribute("disabled")).toBe(true))
+    expect(
+      screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")
+    ).toBe(true)
+    await act(async () => {
+      resolveDelete?.(success(archiveWikiSummary))
+    })
+  })
+
   it("disables renaming while the current wiki is busy", async () => {
     const api = createDesktopApi({ activeWikiRunning: true })
     window.amend = api
@@ -486,6 +623,11 @@ describe("wiki app", () => {
           .hasAttribute("disabled")
       ).toBe(true)
     )
+    expect(
+      screen
+        .getByRole("button", { name: "Move wiki to Trash" })
+        .hasAttribute("disabled")
+    ).toBe(true)
   })
 
   it("disables renaming while the current wiki has an unfinished update", async () => {
@@ -502,6 +644,11 @@ describe("wiki app", () => {
           .hasAttribute("disabled")
       ).toBe(true)
     )
+    expect(
+      screen
+        .getByRole("button", { name: "Move wiki to Trash" })
+        .hasAttribute("disabled")
+    ).toBe(true)
   })
 
   it("disables the rename form while the request is pending", async () => {
@@ -960,6 +1107,22 @@ function createDesktopApi({
   update?: WikiUpdateSession | null
 } = {}): MockAmendApi {
   const ingestListeners = new Set<(event: WikiIngestChangedEvent) => void>()
+  let wikiItems = [
+    {
+      id: wikiSummary.id,
+      name: wikiSummary.name,
+      displayPath: wikiSummary.displayPath,
+      active: true,
+      running: activeWikiRunning,
+    },
+    {
+      id: archiveWikiSummary.id,
+      name: archiveWikiSummary.name,
+      displayPath: archiveWikiSummary.displayPath,
+      active: false,
+      running: true,
+    },
+  ]
   const api: MockAmendApi = {
     runtime: "electron",
     platform: "linux",
@@ -971,25 +1134,12 @@ function createDesktopApi({
       home: vi.fn(async () => success({ displayPath: "/research" })),
       create: vi.fn(async () => success(wikiSummary)),
       current: vi.fn(async () => success(wikiSummary)),
-      list: vi.fn(async () =>
-        success([
-          {
-            id: wikiSummary.id,
-            name: wikiSummary.name,
-            displayPath: wikiSummary.displayPath,
-            active: true,
-            running: activeWikiRunning,
-          },
-          {
-            id: archiveWikiSummary.id,
-            name: archiveWikiSummary.name,
-            displayPath: archiveWikiSummary.displayPath,
-            active: false,
-            running: true,
-          },
-        ])
+      list: vi.fn(async () => success(wikiItems)),
+      activate: vi.fn(async ({ wikiId }) =>
+        success(
+          wikiId === archiveWikiSummary.id ? archiveWikiSummary : wikiSummary
+        )
       ),
-      activate: vi.fn(async () => success(wikiSummary)),
       rename: vi.fn(async ({ name }) =>
         success({
           ...wikiSummary,
@@ -997,6 +1147,15 @@ function createDesktopApi({
           displayPath: `/research/${name}`,
         })
       ),
+      delete: vi.fn(async () => {
+        wikiItems = wikiItems
+          .filter(({ id }) => id !== wikiSummary.id)
+          .map((item) => ({
+            ...item,
+            active: item.id === archiveWikiSummary.id,
+          }))
+        return success(archiveWikiSummary)
+      }),
     },
     providers: {
       status: vi.fn(async () => success({ configured: true })),

@@ -49,6 +49,7 @@ describe("wiki IPC", () => {
       subscribeIngestChanged: vi.fn(() => () => undefined),
       subscribeUpdateChanged: vi.fn(() => () => undefined),
       renameWiki: vi.fn(async () => renamed),
+      deleteWiki: vi.fn(async () => null),
     } as unknown as WikiService
     const mainFrame = { url: "app://amend/wiki" }
     const window = {
@@ -111,10 +112,29 @@ describe("wiki IPC", () => {
     })
     expect(service.renameWiki).toHaveBeenCalledTimes(1)
 
+    const deleteHandler = electron.handlers.get(amendChannels.deleteWiki)
+    await expect(
+      deleteHandler?.(event, { wikiId: "wiki_12345678" })
+    ).resolves.toEqual({ ok: true, value: null })
+    expect(service.deleteWiki).toHaveBeenCalledWith({
+      wikiId: "wiki_12345678",
+    })
+    await expect(
+      deleteHandler?.(event, { wikiId: "../escape" })
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "invalid-input",
+        message: "The request contains invalid input.",
+      },
+    })
+    expect(service.deleteWiki).toHaveBeenCalledTimes(1)
+
     dispose()
     expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith(
       amendChannels.renameWiki
     )
     expect(electron.handlers.has(amendChannels.renameWiki)).toBe(false)
+    expect(electron.handlers.has(amendChannels.deleteWiki)).toBe(false)
   })
 })

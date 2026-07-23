@@ -3,6 +3,7 @@ import {
   isCancelIngestInput,
   isContinueWikiUpdateInput,
   isCreateWikiInput,
+  isDeleteWikiInput,
   isIngestDocumentInput,
   isPiCancelLoginInput,
   isPiListModelsInput,
@@ -133,6 +134,14 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
     authorized(options, async (_event, input: unknown) => {
       if (!isRenameWikiInput(input)) return invalidInput()
       return await attempt(async () => options.service.renameWiki(input))
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.deleteWiki,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isDeleteWikiInput(input)) return invalidInput()
+      return await attempt(async () => options.service.deleteWiki(input))
     })
   )
 
@@ -317,6 +326,7 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
       amendChannels.listWikis,
       amendChannels.activateWiki,
       amendChannels.renameWiki,
+      amendChannels.deleteWiki,
       amendChannels.chooseSourceDocument,
       amendChannels.registerSourceDocument,
       amendChannels.startIngest,

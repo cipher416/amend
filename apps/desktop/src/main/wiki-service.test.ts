@@ -30,6 +30,234 @@ afterEach(async () => {
 })
 
 describe("wiki service", () => {
+  it("moves the active wiki to Trash and opens the first remaining wiki", async () => {
+    const parent = await temporaryDirectory()
+    const firstPath = join(parent, "Alpha Wiki")
+    const secondPath = join(parent, "Beta Wiki")
+    await Promise.all([mkdir(firstPath), mkdir(secondPath)])
+    const firstId = "123e4567-e89b-42d3-a456-426614174001"
+    const secondId = "123e4567-e89b-42d3-a456-426614174002"
+    const trashed: string[] = []
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      moveToTrash: async (wikiPath) => {
+        trashed.push(wikiPath)
+        await rm(wikiPath, { recursive: true })
+      },
+      readWiki: async ({ wikiPath }) => {
+        if (wikiPath === firstPath) {
+          return { id: firstId, domain: "Alpha", setupStatus: "ready" }
+        }
+        if (wikiPath === secondPath) {
+          return { id: secondId, domain: "Beta", setupStatus: "ready" }
+        }
+        throw new Error("Not a wiki")
+      },
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
+    })
+    await service.setWikiHome(parent)
+    await service.openWiki(secondPath)
+    const databasePath = join(
+      parent,
+      "user-data",
+      "indexes",
+      `${secondId}.sqlite`
+    )
+    await mkdir(join(parent, "user-data", "indexes"), { recursive: true })
+    await Promise.all(
+      [databasePath, `${databasePath}-shm`, `${databasePath}-wal`].map((path) =>
+        writeFile(path, "derived")
+      )
+    )
+
+    const active = await service.deleteWiki({ wikiId: secondId })
+
+    assert.deepEqual(trashed, [secondPath])
+    assert.equal(active?.id, firstId)
+    assert.equal(service.getCurrentWiki()?.id, firstId)
+    assert.deepEqual(
+      (await service.listWikis()).map(({ id, active: isActive }) => ({
+        id,
+        active: isActive,
+      })),
+      [{ id: firstId, active: true }]
+    )
+    await Promise.all(
+      [databasePath, `${databasePath}-shm`, `${databasePath}-wal`].map(
+        async (path) => await assert.rejects(access(path))
+      )
+    )
+    await service.dispose()
+  })
+
+  it("clears the active wiki after moving the final wiki to Trash", async () => {
+    const parent = await temporaryDirectory()
+    const wikiPath = join(parent, "Only Wiki")
+    await mkdir(wikiPath)
+    const wikiId = "123e4567-e89b-42d3-a456-426614174005"
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      moveToTrash: async (path) => await rm(path, { recursive: true }),
+      readWiki: async ({ wikiPath: candidate }) => {
+        if (candidate !== wikiPath) throw new Error("Not a wiki")
+        return { id: wikiId, domain: "Only", setupStatus: "ready" }
+      },
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
+    })
+    await service.setWikiHome(parent)
+    await service.openWiki(wikiPath)
+
+    assert.equal(await service.deleteWiki({ wikiId }), null)
+    assert.equal(service.getCurrentWiki(), null)
+    assert.deepEqual(await service.listWikis(), [])
+    assert.equal(
+      (
+        await new WikiHome({
+          userDataPath: join(parent, "user-data"),
+        }).read()
+      )?.lastActiveWikiId,
+      null
+    )
+    await service.dispose()
+  })
+
+  it("preserves the current wiki when moving another wiki to Trash", async () => {
+    const parent = await temporaryDirectory()
+    const activePath = join(parent, "Active Wiki")
+    const inactivePath = join(parent, "Inactive Wiki")
+    await Promise.all([mkdir(activePath), mkdir(inactivePath)])
+    const activeId = "123e4567-e89b-42d3-a456-426614174006"
+    const inactiveId = "123e4567-e89b-42d3-a456-426614174007"
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      moveToTrash: async (path) => await rm(path, { recursive: true }),
+      readWiki: async ({ wikiPath }) => {
+        if (wikiPath === activePath) {
+          return { id: activeId, domain: "Active", setupStatus: "ready" }
+        }
+        if (wikiPath === inactivePath) {
+          return { id: inactiveId, domain: "Inactive", setupStatus: "ready" }
+        }
+        throw new Error("Not a wiki")
+      },
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
+    })
+    await service.setWikiHome(parent)
+    await service.openWiki(activePath)
+
+    const active = await service.deleteWiki({ wikiId: inactiveId })
+
+    assert.equal(active?.id, activeId)
+    assert.equal(service.getCurrentWiki()?.id, activeId)
+    await service.dispose()
+  })
+
+  it("does not change wiki state when moving it to Trash fails", async () => {
+    const parent = await temporaryDirectory()
+    const wikiPath = join(parent, "Wiki")
+    await mkdir(wikiPath)
+    const wikiId = "123e4567-e89b-42d3-a456-426614174008"
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      moveToTrash: async () => {
+        throw new Error("Trash unavailable")
+      },
+      readWiki: async ({ wikiPath: candidate }) => {
+        if (candidate !== wikiPath) throw new Error("Not a wiki")
+        return { id: wikiId, domain: "Research", setupStatus: "ready" }
+      },
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
+    })
+    await service.setWikiHome(parent)
+    await service.openWiki(wikiPath)
+
+    await assert.rejects(
+      service.deleteWiki({ wikiId }),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "operation-failed"
+    )
+    assert.equal(service.getCurrentWiki()?.id, wikiId)
+    await assert.doesNotReject(access(wikiPath))
+    await service.dispose()
+  })
+
+  it("rejects moving a missing wiki to Trash", async () => {
+    const parent = await temporaryDirectory()
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      moveToTrash: async () => undefined,
+    })
+    await service.setWikiHome(parent)
+
+    await assert.rejects(
+      service.deleteWiki({
+        wikiId: "123e4567-e89b-42d3-a456-426614174099",
+      }),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "invalid-input"
+    )
+    await service.dispose()
+  })
+
+  it("serializes Trash moves with other wiki lifecycle operations", async () => {
+    const parent = await temporaryDirectory()
+    const firstPath = join(parent, "First Wiki")
+    const secondPath = join(parent, "Second Wiki")
+    await Promise.all([mkdir(firstPath), mkdir(secondPath)])
+    const firstId = "123e4567-e89b-42d3-a456-426614174010"
+    const secondId = "123e4567-e89b-42d3-a456-426614174011"
+    let finishTrash: (() => void) | undefined
+    const trashStarted = new Promise<void>((resolveStarted) => {
+      finishTrash = resolveStarted
+    })
+    let allowTrash: (() => void) | undefined
+    const trashAllowed = new Promise<void>((resolveAllowed) => {
+      allowTrash = resolveAllowed
+    })
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      moveToTrash: async (path) => {
+        finishTrash?.()
+        await trashAllowed
+        await rm(path, { recursive: true })
+      },
+      readWiki: async ({ wikiPath }) => {
+        if (wikiPath === firstPath) {
+          return { id: firstId, domain: "First", setupStatus: "ready" }
+        }
+        if (wikiPath === secondPath) {
+          return { id: secondId, domain: "Second", setupStatus: "ready" }
+        }
+        throw new Error("Not a wiki")
+      },
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
+    })
+    await service.setWikiHome(parent)
+    await service.openWiki(firstPath)
+
+    const deletion = service.deleteWiki({ wikiId: secondId })
+    await trashStarted
+    await assert.rejects(
+      service.activateWiki(secondId),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "busy"
+    )
+    allowTrash?.()
+    await deletion
+    await service.dispose()
+  })
+
   it("renames a wiki directory while preserving its identity", async () => {
     const parent = await temporaryDirectory()
     const wikiId = "123e4567-e89b-42d3-a456-426614174003"
@@ -481,6 +709,11 @@ describe("wiki service", () => {
         wikiId: service.getCurrentWiki()!.id,
         name: "Renamed Wiki",
       }),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "busy"
+    )
+    await assert.rejects(
+      service.deleteWiki({ wikiId: service.getCurrentWiki()!.id }),
       (error: unknown) =>
         error instanceof WikiServiceError && error.code === "busy"
     )
@@ -1029,6 +1262,11 @@ describe("wiki service", () => {
         wikiId: service.getCurrentWiki()!.id,
         name: "Renamed Wiki",
       }),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "busy"
+    )
+    await assert.rejects(
+      service.deleteWiki({ wikiId: service.getCurrentWiki()!.id }),
       (error: unknown) =>
         error instanceof WikiServiceError && error.code === "busy"
     )

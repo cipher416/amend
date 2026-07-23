@@ -5,6 +5,7 @@ import {
   isActivateWikiInput,
   isCancelIngestInput,
   isCreateWikiInput,
+  isDeleteWikiInput,
   isContinueWikiUpdateInput,
   isIngestDocumentInput,
   isPiCancelLoginInput,
@@ -54,6 +55,7 @@ describe("desktop contract validation", () => {
       listWikis: "amend:wikis:list",
       activateWiki: "amend:wikis:activate",
       renameWiki: "amend:wikis:rename",
+      deleteWiki: "amend:wikis:delete",
       setAppearanceTheme: "amend:appearance:set-theme",
       getProviderStatus: "amend:providers:status",
       listProviders: "amend:providers:list",
@@ -93,6 +95,7 @@ describe("desktop contract validation", () => {
         name: "Renamed Research",
       })
     ).toBe(true)
+    expect(isDeleteWikiInput({ wikiId: "wiki_12345678" })).toBe(true)
     expect(isReadWikiFileInput({ path: "concepts/cache.md" })).toBe(true)
     expect(
       isStartWikiUpdateInput({
@@ -141,6 +144,10 @@ describe("desktop contract validation", () => {
         name: "../escape",
       })
     ).toBe(false)
+    expect(isDeleteWikiInput({ wikiId: "../other-wiki" })).toBe(false)
+    expect(isDeleteWikiInput({ wikiId: "wiki_12345678", extra: true })).toBe(
+      false
+    )
     expect(
       isRenameWikiInput({
         wikiId: "../other-wiki",

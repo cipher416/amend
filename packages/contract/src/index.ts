@@ -56,6 +56,10 @@ export interface RenameWikiInput {
   name: string
 }
 
+export interface DeleteWikiInput {
+  wikiId: string
+}
+
 export interface WikiSummary {
   id: string
   name: string
@@ -382,6 +386,7 @@ export interface AmendApi {
     list: () => Promise<AmendResult<readonly WikiListItem[]>>
     activate: (input: ActivateWikiInput) => Promise<AmendResult<WikiSummary>>
     rename: (input: RenameWikiInput) => Promise<AmendResult<WikiSummary>>
+    delete: (input: DeleteWikiInput) => Promise<AmendResult<WikiSummary | null>>
   }
   readonly providers: {
     status: () => Promise<AmendResult<PiConnectionStatus>>
@@ -511,6 +516,13 @@ export const renameWikiInputSchema = Type.Object(
   {
     wikiId: activateWikiInputSchema.properties.wikiId,
     name: wikiNameSchema,
+  },
+  { additionalProperties: false }
+)
+
+export const deleteWikiInputSchema = Type.Object(
+  {
+    wikiId: activateWikiInputSchema.properties.wikiId,
   },
   { additionalProperties: false }
 )
@@ -651,6 +663,10 @@ export function isActivateWikiInput(
 
 export function isRenameWikiInput(value: unknown): value is RenameWikiInput {
   return Value.Check(renameWikiInputSchema, value)
+}
+
+export function isDeleteWikiInput(value: unknown): value is DeleteWikiInput {
+  return Value.Check(deleteWikiInputSchema, value)
 }
 
 export function isIngestDocumentInput(
