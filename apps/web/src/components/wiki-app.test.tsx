@@ -452,6 +452,11 @@ describe("wiki app", () => {
     ).toBe(true)
 
     await user.clear(name)
+    await user.type(name, "../escape")
+    expect(
+      screen.getByRole("button", { name: "Rename" }).hasAttribute("disabled")
+    ).toBe(true)
+    await user.clear(name)
     await user.type(name, "Operations Wiki")
     await user.click(screen.getByRole("button", { name: "Rename" }))
 
@@ -463,6 +468,7 @@ describe("wiki app", () => {
     )
     expect(routeHarness.wikiId).toBe(wikiSummary.id)
     expect(await screen.findByText("Operations Wiki")).toBeTruthy()
+    await waitFor(() => expect(api.wikis.list).toHaveBeenCalledTimes(2))
   })
 
   it("disables renaming while the current wiki is busy", async () => {
@@ -471,11 +477,63 @@ describe("wiki app", () => {
 
     renderWikiApp(api, { initialWikiId: wikiSummary.id })
 
-    expect(
-      (await screen.findByRole("button", { name: "Rename wiki" })).hasAttribute(
-        "disabled"
+    await screen.findByRole("button", { name: "Rename wiki" })
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Rename wiki" })
+          .hasAttribute("disabled")
+      ).toBe(true)
+    )
+  })
+
+  it("disables renaming while the current wiki has an unfinished update", async () => {
+    const api = createDesktopApi({ update: reviewUpdateSession })
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await screen.findByRole("button", { name: "Rename wiki" })
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Rename wiki" })
+          .hasAttribute("disabled")
+      ).toBe(true)
+    )
+  })
+
+  it("disables the rename form while the request is pending", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    let resolveRename: ((result: AmendResult<WikiSummary>) => void) | undefined
+    api.wikis.rename = vi.fn(
+      async () =>
+        await new Promise<AmendResult<WikiSummary>>((resolve) => {
+          resolveRename = resolve
+        })
+    )
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await user.click(await screen.findByRole("button", { name: "Rename wiki" }))
+    const name = screen.getByLabelText("Wiki name")
+    await user.clear(name)
+    await user.type(name, "Operations Wiki")
+    const rename = screen.getByRole("button", { name: "Rename" })
+    await user.click(rename)
+
+    await waitFor(() => expect(rename.hasAttribute("disabled")).toBe(true))
+    await act(async () => {
+      resolveRename?.(
+        success({
+          ...wikiSummary,
+          name: "Operations Wiki",
+          displayPath: "/research/Operations Wiki",
+        })
       )
-    ).toBe(true)
+    })
   })
 
   it("keeps the rename dialog open when renaming fails", async () => {

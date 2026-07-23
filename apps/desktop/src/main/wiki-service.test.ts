@@ -115,6 +115,25 @@ describe("wiki service", () => {
     await service.dispose()
   })
 
+  it("rejects renaming a wiki that is not in the wiki home", async () => {
+    const parent = await temporaryDirectory()
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+    })
+    await service.setWikiHome(parent)
+
+    await assert.rejects(
+      service.renameWiki({
+        wikiId: "123e4567-e89b-42d3-a456-426614174099",
+        name: "Missing Wiki",
+      }),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "invalid-input"
+    )
+    await service.dispose()
+  })
+
   it("supports changing only the case of a wiki name", async () => {
     const parent = await temporaryDirectory()
     const originalPath = join(parent, "Research Wiki")

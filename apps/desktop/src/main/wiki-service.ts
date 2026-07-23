@@ -70,7 +70,7 @@ import { WikiHome } from "./wiki-home.ts"
 
 interface ActiveWiki {
   summary: WikiSummary
-  workspacePath: string
+  wikiPath: string
   index: WikiIndex
 }
 
@@ -473,6 +473,9 @@ export class WikiService {
     input: IngestDocumentInput
   ): Promise<StartIngestResult> {
     this.assertOpen()
+    if (this.lifecycleOperation) {
+      throw new WikiServiceError("busy", "Amend is already working.")
+    }
     const active = this.requireActive()
     if (this.modelOperation || this.modelOperationStarting) {
       throw new WikiServiceError("busy", "Amend is already working.")
@@ -571,6 +574,9 @@ export class WikiService {
     input: StartWikiUpdateInput
   ): Promise<StartWikiUpdateResult> {
     this.assertOpen()
+    if (this.lifecycleOperation) {
+      throw new WikiServiceError("busy", "Amend is already working.")
+    }
     const active = this.requireActive()
     if (this.updates.has(active.summary.id)) {
       throw new WikiServiceError(
@@ -588,7 +594,7 @@ export class WikiService {
       return await (
         this.options.createUpdateProposal ?? createWikiUpdateProposalSession
       )({
-        workspacePath: active.workspacePath,
+        workspacePath: active.wikiPath,
         agent,
         createRunId: this.createId,
         now: this.now,
@@ -812,7 +818,7 @@ export class WikiService {
     this.assertOpen()
     const active = this.requireActive()
     try {
-      return await listWorkspaceFiles(active.workspacePath)
+      return await listWorkspaceFiles(active.wikiPath)
     } catch (error) {
       throw new WikiServiceError(
         "operation-failed",
@@ -829,7 +835,7 @@ export class WikiService {
       throw new WikiServiceError("invalid-input", "Choose a wiki file.")
     }
     const { absolutePath, relativePath } = workspaceFilePath(
-      active.workspacePath,
+      active.wikiPath,
       input.path
     )
     const metadata = await lstat(absolutePath).catch((error) => {
@@ -987,7 +993,7 @@ export class WikiService {
       }
       await this.setActiveWiki({
         summary,
-        workspacePath: canonicalPath,
+        wikiPath: canonicalPath,
         index,
       })
       return summary
@@ -1015,21 +1021,21 @@ export class WikiService {
   }
 
   private async openAndActivateWiki(
-    workspacePath: string,
+    wikiPath: string,
     expectedId?: string
   ): Promise<WikiSummary> {
-    const context = await this.openWikiContext(workspacePath, expectedId)
+    const context = await this.openWikiContext(wikiPath, expectedId)
     await this.setActiveWiki(context)
     return context.summary
   }
 
   private async openWikiContext(
-    workspacePath: string,
+    wikiPath: string,
     expectedId?: string
   ): Promise<ActiveWiki> {
     let index: WikiIndex | undefined
     try {
-      const canonicalPath = await realpath(resolve(workspacePath))
+      const canonicalPath = await realpath(resolve(wikiPath))
       const wiki = await (this.options.readWiki ?? readWiki)({
         wikiPath: canonicalPath,
       })
@@ -1037,7 +1043,7 @@ export class WikiService {
         throw new Error("The wiki ID does not match the catalog record")
       }
       const existing = this.contexts.get(wiki.id)
-      if (existing?.workspacePath === canonicalPath) {
+      if (existing?.wikiPath === canonicalPath) {
         return existing
       }
       index = await this.openWorkspaceIndex(canonicalPath, wiki.id, existing)
@@ -1052,7 +1058,7 @@ export class WikiService {
       }
       return {
         summary,
-        workspacePath: canonicalPath,
+        wikiPath: canonicalPath,
         index,
       }
     } catch (error) {
@@ -1122,9 +1128,9 @@ export class WikiService {
       (wiki): wiki is { id: string; path: string } => Boolean(wiki)
     )
     for (const context of this.contexts.values()) {
-      if (!isPathInside(home.wikiDirectory, context.workspacePath)) continue
+      if (!isPathInside(home.wikiDirectory, context.wikiPath)) continue
       if (!discovered.some(({ id }) => id === context.summary.id)) {
-        discovered.push({ id: context.summary.id, path: context.workspacePath })
+        discovered.push({ id: context.summary.id, path: context.wikiPath })
       }
     }
     return discovered.sort((left, right) => left.path.localeCompare(right.path))
@@ -1214,7 +1220,7 @@ export class WikiService {
         document.extension === ".pdf" ? "papers" : "articles"
       const sourcePath = `raw/${sourceDirectory}/${sourceSlug(document.title, this.createId())}.md`
       const run = await engine.ingest({
-        workspacePath: active.workspacePath,
+        workspacePath: active.wikiPath,
         sources: [
           { path: sourcePath, title: document.title, content: sourceText },
         ],

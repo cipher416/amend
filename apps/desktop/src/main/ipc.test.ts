@@ -91,6 +91,26 @@ describe("wiki IPC", () => {
     })
     expect(service.renameWiki).toHaveBeenCalledTimes(1)
 
+    await expect(
+      handler?.(
+        {
+          sender: { id: 8, mainFrame },
+          senderFrame: mainFrame,
+        },
+        {
+          wikiId: "wiki_12345678",
+          name: "Another Name",
+        }
+      )
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "unauthorized",
+        message: "The request was not authorized.",
+      },
+    })
+    expect(service.renameWiki).toHaveBeenCalledTimes(1)
+
     dispose()
     expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith(
       amendChannels.renameWiki
