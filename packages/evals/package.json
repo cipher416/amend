@@ -6,8 +6,6 @@
   "scripts": {
     "eval:wiki": "tsx src/wiki-live.eval.ts",
     "eval:wiki-update": "tsx src/wiki-update-live.eval.ts",
-    "lint": "eslint",
-    "format": "prettier --write \"**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -16,10 +14,8 @@
     "turndown": "^7.2.4"
   },
   "devDependencies": {
-    "@tanstack/eslint-config": "0.4.0",
     "@types/node": "22.19.15",
     "@types/turndown": "^5.0.6",
-    "eslint": "10.0.1",
     "tsx": "4.21.0",
     "typescript": "6.0.3",
     "vitest": "4.1.6"

@@ -36,7 +36,13 @@ import { WikiSetupStep } from "./wiki-setup-step"
 import { WorkflowShell } from "./wiki-workflow-ui"
 
 type BusyOperation =
-  "home" | "switch" | "document" | "create" | "ingest" | "index" | null
+  | "home"
+  | "switch"
+  | "document"
+  | "create"
+  | "ingest"
+  | "index"
+  | null
 
 interface WorkflowState {
   piConfigured?: boolean

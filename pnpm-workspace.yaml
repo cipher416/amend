@@ -2,8 +2,14 @@ packages:
   - "apps/*"
   - "packages/*"
 
+onlyBuiltDependencies:
+  - esbuild
+  - lefthook
+  - lightningcss
+
 allowBuilds:
   esbuild: true
+  lefthook: true
   lightningcss: true
   unrs-resolver: true
   msw: false

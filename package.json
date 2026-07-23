@@ -5,8 +5,10 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
-    "lint": "turbo lint",
-    "format": "turbo format",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "eval:wiki": "pnpm --filter @workspace/evals eval:wiki",
@@ -14,8 +16,10 @@
     "package:desktop": "pnpm --filter web build && pnpm --filter desktop package"
   },
   "devDependencies": {
-    "prettier": "^3.8.3",
-    "prettier-plugin-tailwindcss": "^0.8.0",
+    "lefthook": "^2.1.10",
+    "oxfmt": "^0.60.0",
+    "oxlint": "^1.75.0",
+    "oxlint-tsgolint": "^7.0.2001",
     "turbo": "^2.9.18",
     "typescript": "^6"
   },
@@ -26,6 +30,7 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
+      "lefthook",
       "lightningcss"
     ],
     "patchedDependencies": {

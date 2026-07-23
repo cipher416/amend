@@ -13,7 +13,6 @@
   "scripts": {
     "dev": "wait-on http-get://127.0.0.1:3001 && electron-forge start",
     "build": "node -e \"require('node:fs').rmSync('.vite', { recursive: true, force: true })\" && vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
-    "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && node src/main/sqlite-smoke.mjs",
     "package": "electron-forge package",
@@ -26,10 +25,8 @@
     "@electron-forge/plugin-vite": "7.11.2",
     "@electron-forge/shared-types": "7.11.2",
     "@electron/fuses": "1.8.0",
-    "@tanstack/eslint-config": "0.4.0",
     "@types/node": "22.19.15",
     "electron": "43.1.1",
-    "eslint": "10.0.1",
     "tsx": "4.21.0",
     "typescript": "6.0.3",
     "vite": "8.1.5",

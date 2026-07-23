@@ -27,7 +27,8 @@ export interface AmendError {
 }
 
 export type AmendResult<T> =
-  { ok: true; value: T } | { ok: false; error: AmendError }
+  | { ok: true; value: T }
+  | { ok: false; error: AmendError }
 
 export interface WikiHome {
   displayPath: string
@@ -109,7 +110,10 @@ export interface StartIngestResult {
 }
 
 export type WikiIngestJobStatus =
-  "running" | "completed" | "failed" | "cancelled"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
 
 export interface WikiIngestJob {
   id: string
@@ -206,7 +210,10 @@ export interface StartWikiUpdateResult {
 }
 
 export type WikiUpdateSessionStatus =
-  "running" | "review" | "applying" | "failed"
+  | "running"
+  | "review"
+  | "applying"
+  | "failed"
 
 export interface WikiUpdateMessage {
   id: string
@@ -219,7 +226,14 @@ export interface WikiUpdateMessage {
 export interface WikiUpdateActivity {
   id: string
   tool:
-    "read" | "grep" | "find" | "ls" | "edit" | "write" | "validate" | "repair"
+    | "read"
+    | "grep"
+    | "find"
+    | "ls"
+    | "edit"
+    | "write"
+    | "validate"
+    | "repair"
   label: string
   status: "running" | "complete" | "failed"
 }
@@ -450,7 +464,8 @@ const wikiNameSchema = Type.Refine(
     value.trim() === value &&
     value !== "." &&
     value !== ".." &&
-    !/[\\/\0]/.test(value),
+    !/[\\/]/.test(value) &&
+    !value.includes("\0"),
   () => "Wiki name must be a safe directory name"
 )
 

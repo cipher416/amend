@@ -97,7 +97,7 @@ export function WikiFileSearch({
 
   return (
     <div
-      className="group/file-search relative h-8 w-8 shrink-0 overflow-clip data-[animate=true]:transition-[width] data-[animate=true]:duration-[180ms] data-[animate=true]:ease-[cubic-bezier(0.23,1,0.32,1)] data-[open=true]:w-[18rem] sm:data-[open=true]:w-[22rem] motion-reduce:transition-none"
+      className="group/file-search relative h-8 w-8 shrink-0 overflow-clip data-[animate=true]:transition-[width] data-[animate=true]:duration-[180ms] data-[animate=true]:ease-[cubic-bezier(0.23,1,0.32,1)] data-[open=true]:w-[18rem] motion-reduce:transition-none sm:data-[open=true]:w-[22rem]"
       data-animate={animated}
       data-open={open}
     >
@@ -115,7 +115,7 @@ export function WikiFileSearch({
       </Button>
       {open ? (
         <div
-          className="starting:translate-x-1 starting:scale-[0.98] starting:opacity-0 absolute inset-y-0 right-0 flex w-[18rem] origin-right items-center gap-1.5 group-data-[animate=true]/file-search:transition-[opacity,transform] group-data-[animate=true]/file-search:duration-[180ms] group-data-[animate=true]/file-search:ease-[cubic-bezier(0.23,1,0.32,1)] sm:w-[22rem] motion-reduce:transition-none"
+          className="absolute inset-y-0 right-0 flex w-[18rem] origin-right items-center gap-1.5 group-data-[animate=true]/file-search:transition-[opacity,transform] group-data-[animate=true]/file-search:duration-[180ms] group-data-[animate=true]/file-search:ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none sm:w-[22rem] starting:translate-x-1 starting:scale-[0.98] starting:opacity-0"
           role="search"
         >
           <div className="relative min-w-0">
@@ -281,7 +281,8 @@ function clearFallbackHighlights() {
 
 function getHighlightRegistry(): HighlightRegistry | undefined {
   const css = globalThis.CSS as unknown as
-    { highlights?: HighlightRegistry } | undefined
+    | { highlights?: HighlightRegistry }
+    | undefined
   return css?.highlights
 }
 

@@ -51,7 +51,13 @@ import type {
 import { WikiUpdateAgentError } from "../update/index.ts"
 
 export type PiThinkingLevel =
-  "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
 
 export interface PiAgentOptions {
   provider: string
@@ -175,7 +181,8 @@ export function createPiWikiUpdateAgentSession(
 ): WikiUpdateAgentSession {
   let activeWorkspacePath: string | undefined
   let activeSession:
-    Awaited<ReturnType<typeof createUpdatePiSession>> | undefined
+    | Awaited<ReturnType<typeof createUpdatePiSession>>
+    | undefined
   let disposed = false
 
   return {

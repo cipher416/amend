@@ -4,8 +4,6 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "lint": "eslint",
-    "format": "prettier --write \"**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -18,9 +16,7 @@
     "yaml": "2.9.0"
   },
   "devDependencies": {
-    "@tanstack/eslint-config": "0.4.0",
     "@types/node": "22.19.15",
-    "eslint": "10.0.1",
     "typescript": "6.0.3",
     "vitest": "4.1.6"
   },

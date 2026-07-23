@@ -27,7 +27,8 @@ const routeHarness = vi.hoisted(() => ({
   queryClient: undefined as QueryClient | undefined,
   renderOutlet: undefined as undefined | (() => ReactNode),
   navigate: undefined as
-    undefined | ((wikiId: string, filePath?: string) => void),
+    | undefined
+    | ((wikiId: string, filePath?: string) => void),
   creatingWiki: false,
 }))
 

@@ -115,14 +115,14 @@ model identifiers plus login progress—it never receives credentials.
 
 This is a pnpm/Turborepo monorepo:
 
-| Path | Purpose |
-| --- | --- |
-| `apps/desktop` | Electron main process, secure preload bridge, and desktop services |
-| `apps/web` | React 19 and TanStack Router renderer |
-| `packages/wiki-engine` | Git-backed ingest, update, validation, and SQLite indexing |
-| `packages/contract` | Runtime-validated IPC types and channel contracts |
-| `packages/ui` | Shared shadcn/ui components and styles |
-| `packages/evals` | Live model quality evaluations |
+| Path                   | Purpose                                                            |
+| ---------------------- | ------------------------------------------------------------------ |
+| `apps/desktop`         | Electron main process, secure preload bridge, and desktop services |
+| `apps/web`             | React 19 and TanStack Router renderer                              |
+| `packages/wiki-engine` | Git-backed ingest, update, validation, and SQLite indexing         |
+| `packages/contract`    | Runtime-validated IPC types and channel contracts                  |
+| `packages/ui`          | Shared shadcn/ui components and styles                             |
+| `packages/evals`       | Live model quality evaluations                                     |
 
 Useful commands:
 
@@ -130,8 +130,10 @@ Useful commands:
 pnpm dev                # Run Vite and Electron
 pnpm test               # Run the test suite
 pnpm typecheck          # Check TypeScript
-pnpm lint               # Run ESLint
-pnpm format             # Format workspace sources
+pnpm lint               # Run Oxlint
+pnpm lint:fix           # Apply safe Oxlint fixes
+pnpm format             # Format sources with Oxfmt
+pnpm format:check       # Check formatting without writing
 pnpm build              # Build all packages
 pnpm package:desktop    # Create an unpacked desktop application
 ```
