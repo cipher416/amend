@@ -10,6 +10,10 @@ const config = defineConfig({
     devtools(),
     tailwindcss(),
     tanstackStart({
+      router: {
+        quoteStyle: "double",
+        semicolons: false,
+      },
       spa: {
         enabled: true,
       },

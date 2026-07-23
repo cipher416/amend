@@ -154,7 +154,7 @@ const WikiWikiIdRouteChildren: WikiWikiIdRouteChildren = {
 }
 
 const WikiWikiIdRouteWithChildren = WikiWikiIdRoute._addFileChildren(
-  WikiWikiIdRouteChildren
+  WikiWikiIdRouteChildren,
 )
 
 interface WikiRouteChildren {
