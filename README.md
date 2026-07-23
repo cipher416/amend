@@ -1,85 +1,190 @@
 # Amend
 
-Amend is a local-first, self-maintaining wiki. This workspace starts from the
-shadcn/ui TanStack Start monorepo template.
+**A local-first, self-maintaining wiki built from the documents you already
+have.**
 
-## Development
+Amend turns PDFs, Markdown, and text files into a browsable knowledge wiki on
+your computer. It uses an AI model to connect ideas across sources, keeps the
+extracted source text alongside the generated pages, and records every
+accepted change in Git.
+
+The result is an ordinary folder of Markdown files—not a hosted database or a
+proprietary export.
+
+![Amend showing a local Transformer research wiki with an AI-assisted update panel](docs/assets/amend-wiki.png)
+
+> Amend is under active development. There are no packaged releases yet; the
+> app currently runs from source.
+
+## What Amend does
+
+- **Builds a wiki from source documents.** Add a PDF, Markdown file, or UTF-8
+  text file and tell Amend what matters.
+- **Connects new material to existing knowledge.** Later documents update the
+  wiki instead of creating isolated summaries.
+- **Lets you refine the wiki with AI.** Ask for an update, inspect the proposed
+  file changes, then apply or discard them.
+- **Keeps your data local.** Wiki files, source material, Git history, and the
+  SQLite search index stay on your machine.
+- **Makes every accepted change traceable.** Each ingest and AI-assisted update
+  becomes a Git commit with run metadata.
+- **Searches across pages and sources.** Amend builds a derived full-text index
+  without putting the database inside your wiki repository.
+
+## How it works
+
+Each wiki is a standalone Git repository containing:
+
+```text
+my-wiki/
+├── index.md             # Wiki front page
+├── entities/            # People, organizations, systems, and other things
+├── concepts/            # Ideas and mechanisms
+├── comparisons/         # Explicit contrasts and trade-offs
+├── queries/             # Question-oriented synthesis
+├── raw/                 # Preserved source material
+├── log.md               # Append-only history of Amend runs
+└── .amend/              # Wiki identity and run metadata
+```
+
+Amend stages AI work in an isolated Git worktree, validates the result, and
+only promotes it to the wiki after the run succeeds. Interactive wiki updates
+remain proposals until you choose **Apply**.
+
+Wiki storage and indexing are local. During AI-assisted ingest and updates,
+relevant content is sent to the model provider you connect during onboarding;
+provider authentication also communicates with that provider.
+
+## Run from source
+
+### Prerequisites
+
+- [Git](https://git-scm.com/) available on `PATH`
+- [mise](https://mise.jdx.dev/) for the pinned Node.js and pnpm versions
+- Credentials for a model provider supported by
+  [Pi](https://github.com/badlogic/pi-mono)
+
+The workspace currently pins Node.js 22.23.1 and pnpm 10.33.4. If you do not
+use mise, install compatible versions yourself; Node.js 22.13.0 or newer is
+required.
+
+### Start the desktop app
 
 ```bash
+git clone https://github.com/cipher416/amend.git
+cd amend
 mise install
 pnpm install
 pnpm dev
 ```
 
-`pnpm dev` starts the Vite development server and Electron together. The
-development server is used only for hot module replacement.
+`pnpm dev` starts the Vite renderer on `127.0.0.1:3001` and launches Electron.
+The browser URL is only a development renderer; wiki features require the
+desktop app.
 
-Build the serverless desktop package with:
+On first launch:
+
+1. Connect a model provider.
+2. Choose a **wiki home**, the directory where Amend will create wiki folders.
+3. Add a PDF, Markdown, or text document up to 25 MB.
+4. Name the wiki and optionally describe what Amend should focus on.
+5. Wait for Amend to extract, organize, validate, commit, and index the result.
+
+Every wiki is created as a sibling directory directly inside the selected wiki
+home.
+
+## Model providers
+
+Amend uses the Pi model registry and credential store. During onboarding you
+can:
+
+- Sign in to Anthropic with Claude Pro/Max.
+- Sign in to OpenAI with ChatGPT Plus/Pro through Codex.
+- Enter an API key for another provider known to Pi, including OpenAI, Google,
+  Mistral, and Z.ai.
+
+After authentication, choose the default model Amend should use. Configuration
+is stored in `~/.pi/agent/settings.json` and credentials in
+`~/.pi/agent/auth.json`.
+
+OAuth, API keys, token exchange, filesystem access, and model execution are
+handled in the Electron main process. The renderer only receives provider and
+model identifiers plus login progress—it never receives credentials.
+
+## Development
+
+This is a pnpm/Turborepo monorepo:
+
+| Path | Purpose |
+| --- | --- |
+| `apps/desktop` | Electron main process, secure preload bridge, and desktop services |
+| `apps/web` | React 19 and TanStack Router renderer |
+| `packages/wiki-engine` | Git-backed ingest, update, validation, and SQLite indexing |
+| `packages/contract` | Runtime-validated IPC types and channel contracts |
+| `packages/ui` | Shared shadcn/ui components and styles |
+| `packages/evals` | Live model quality evaluations |
+
+Useful commands:
 
 ```bash
-pnpm package:desktop
+pnpm dev                # Run Vite and Electron
+pnpm test               # Run the test suite
+pnpm typecheck          # Check TypeScript
+pnpm lint               # Run ESLint
+pnpm format             # Format workspace sources
+pnpm build              # Build all packages
+pnpm package:desktop    # Create an unpacked desktop application
 ```
 
-Add shadcn/ui components from the workspace root:
+The unpacked application is written beneath `apps/desktop/out/`.
+
+To add a shared shadcn/ui component:
 
 ```bash
 pnpm dlx shadcn@latest add button -c apps/web
 ```
 
-Components are installed in `packages/ui/src/components` and imported from the
-shared `@workspace/ui` package.
+Components are installed in `packages/ui/src/components` and imported through
+the `@workspace/ui` package.
 
-## Desktop Boundary
+### Desktop security boundary
 
-TanStack Start emits a prerendered SPA shell for Electron. Packaged builds copy
-only the static client output and load it through the secure `app://amend/`
-protocol; the Start server bundle is not packaged or started. Electron-only
-capabilities must remain behind typed preload IPC. Do not use runtime Start
-server functions for Git, filesystem, database, credentials, or model access.
+The renderer is a prerendered SPA shell. Development uses Vite for hot module
+replacement; packaged builds copy only the static client output and load it
+through the `app://amend/` protocol. No TanStack Start server is packaged or
+started.
 
-## Connecting a Model Provider
+Keep Git, filesystem, SQLite, credentials, and model access in the Electron
+main process behind the typed preload IPC boundary. Do not introduce runtime
+server functions for desktop capabilities.
 
-Before the first wiki can be created, Amend needs a Pi model provider
-connected. If `~/.pi/agent/settings.json` does not already name a provider with
-stored credentials, onboarding shows a connect step instead of the wiki
-form. From there, users can:
+### Live evaluations
 
-- Sign in with Anthropic (Claude Pro/Max) or ChatGPT Plus/Pro (Codex) through a
-  browser-based OAuth flow. Amend opens the system browser and, if the
-  automatic redirect does not complete, prompts for a manually pasted code.
-- Enter a plain API key for any other provider the Pi model registry knows
-  about (OpenAI, Z.ai, Google, Mistral, and more).
+The evaluation package exercises real model-backed ingest and update flows:
 
-Either path ends with picking a default model for that provider, which Amend
-writes to `~/.pi/agent/settings.json` alongside the credential in
-`~/.pi/agent/auth.json`. Credential storage, OAuth token exchange, and browser
-launching all happen in the Electron main process; the renderer only ever sees
-provider ids, model ids, and login-progress events.
+```bash
+pnpm eval:wiki
+pnpm eval:wiki-update
+```
 
-## First Ingest
+These commands use the provider configuration in `~/.pi/agent/settings.json`,
+make paid model calls, and—in the ingest evaluation—download public paper
+content. They are separate from the deterministic `pnpm test` suite.
 
-Creating a wiki requires Git on the desktop application's `PATH`. The first
-source can be a PDF, Markdown file, or UTF-8 text file up to 25 MB; selection
-and text extraction stay in the Electron main process. Ingest uses the default
-provider and model in `~/.pi/agent/settings.json`, with credentials resolved by
-Pi from its auth storage. Amend bundles its pinned wiki-maintenance skill;
-source material, credentials, Git, and the SQLite search index remain in the
-Electron main process. Ingest runs as a main-process job, so renderer reloads
-reconnect to its latest status. Jobs live only for the current application
-session, and can be cancelled until Git commit promotion begins.
+## Data and lifecycle notes
 
-## Wiki Lifecycle
+- The selected wiki home and last active wiki ID are stored in Electron's
+  `userData` directory.
+- Amend only opens wikis it discovers as direct children of the selected wiki
+  home; arbitrary external repositories cannot be attached.
+- Each wiki has a stable ID in `.amend/wiki.json`.
+- The search database is a rebuildable cache stored outside the wiki.
+- Ingest jobs live for the current app session. Reloading the renderer
+  reconnects to a running job, but quitting the app ends it.
+- An ingest can be cancelled until Git commit promotion begins.
 
-On first use, Amend asks for one wiki home. Every wiki is a sibling Git
-repository directly under that directory; the home also contains a hidden
-`.amend` directory for Amend metadata. Each wiki has a stable ID stored in its
-own `.amend/wiki.json` metadata file.
+## Project status
 
-The selected home and last active wiki ID live in Electron `userData`. Amend
-discovers wikis by scanning the wiki home, then restores the last active wiki
-when it is still present. External repositories cannot be opened as wikis.
-
-The SQLite search index is a derived cache keyed by stable wiki ID. The app can
-switch between discovered sibling wikis without cancelling an ingest in another
-wiki. Ingest updates are tagged with their originating wiki ID so the renderer
-only applies them to the matching active wiki.
+Amend is currently an early-stage desktop application. File formats, wiki
+schema, provider support, and packaging may change while the core workflow is
+being developed.
