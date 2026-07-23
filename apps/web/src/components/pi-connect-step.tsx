@@ -662,7 +662,7 @@ function CommandPicker({
       >
         <ComboboxValue placeholder={placeholder} />
       </ComboboxTrigger>
-      <ComboboxContent>
+      <ComboboxContent align="center">
         <ComboboxInput showTrigger={false} placeholder={searchPlaceholder} />
         <ComboboxEmpty>{emptyLabel}</ComboboxEmpty>
         <ComboboxList>
