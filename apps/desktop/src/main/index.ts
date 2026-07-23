@@ -9,6 +9,7 @@ import { registerRendererProtocol } from "./renderer-protocol"
 import { rendererOrigin } from "./renderer-path"
 import { resolveWikiSkillPath } from "./resource-paths"
 import { isAllowedNavigation, secureWebPreferences } from "./security"
+import { moveWikiToTrash } from "./trash"
 import { WikiService } from "./wiki-service"
 
 const developmentRendererUrl = "http://127.0.0.1:3001"
@@ -117,7 +118,7 @@ app.whenReady().then(async () => {
   nativeTheme.themeSource = "system"
   wikiService = new WikiService({
     userDataPath: app.getPath("userData"),
-    moveToTrash: async (wikiPath) => await shell.trashItem(wikiPath),
+    moveToTrash: moveWikiToTrash,
     skillPath: resolveWikiSkillPath({
       isPackaged: app.isPackaged,
       appPath: app.getAppPath(),

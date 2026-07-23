@@ -149,6 +149,7 @@ export class WikiService {
   private lifecycleOperation: Promise<unknown> | undefined
   private modelOperation: Promise<unknown> | undefined
   private modelOperationStarting = false
+  private pendingUpdateWikiId: string | undefined
   private runningIngest: RunningIngest | undefined
   private disposed = false
 
@@ -426,6 +427,12 @@ export class WikiService {
           "Finish or discard the wiki update before deleting it."
         )
       }
+      if (this.pendingUpdateWikiId === input.wikiId) {
+        throw new WikiServiceError(
+          "busy",
+          "Wait for the wiki update to finish starting before deleting it."
+        )
+      }
       const moveToTrash = this.options.moveToTrash
       if (!moveToTrash) {
         throw new WikiServiceError(
@@ -452,10 +459,22 @@ export class WikiService {
       await this.removeWikiIndex(input.wikiId)
 
       if (!wasActive) return this.active?.summary ?? null
-      const next = (await this.discoverWikis()).at(0)
-      if (next) return await this.openAndActivateWiki(next.path, next.id)
+      try {
+        const next = (await this.discoverWikis()).at(0)
+        if (next) return await this.openAndActivateWiki(next.path, next.id)
+      } catch (error) {
+        console.error(
+          "[amend] failed to open a wiki after moving one to Trash:",
+          error
+        )
+      }
       this.active = undefined
-      await this.home.setLastActiveWikiId(null)
+      await this.home.setLastActiveWikiId(null).catch((error: unknown) => {
+        console.error(
+          "[amend] failed to clear the deleted last-active wiki:",
+          error
+        )
+      })
       return null
     })
     this.lifecycleOperation = operation
@@ -669,6 +688,7 @@ export class WikiService {
       throw new WikiServiceError("busy", "Amend is already working.")
     }
     this.modelOperationStarting = true
+    this.pendingUpdateWikiId = active.summary.id
     let agent: WikiUpdateAgentSession | undefined
     const setupOperation = Promise.resolve().then(async () => {
       agent = await this.createUpdateAgent()
@@ -693,6 +713,7 @@ export class WikiService {
         this.modelOperation = undefined
       }
       this.modelOperationStarting = false
+      this.pendingUpdateWikiId = undefined
     }
     if (this.disposed) {
       await proposal.discard().catch(() => undefined)

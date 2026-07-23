@@ -125,6 +125,37 @@ describe("wiki service", () => {
     await service.dispose()
   })
 
+  it("reports successful deletion when the next wiki cannot be opened", async () => {
+    const parent = await temporaryDirectory()
+    const firstPath = join(parent, "Alpha Wiki")
+    const secondPath = join(parent, "Beta Wiki")
+    await Promise.all([mkdir(firstPath), mkdir(secondPath)])
+    const firstId = "123e4567-e89b-42d3-a456-426614174012"
+    const secondId = "123e4567-e89b-42d3-a456-426614174013"
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      moveToTrash: async (path) => await rm(path, { recursive: true }),
+      readWiki: async ({ wikiPath }) => ({
+        id: wikiPath === firstPath ? firstId : secondId,
+        domain: "Research",
+        setupStatus: "ready",
+      }),
+      openIndex: async ({ workspacePath }) => {
+        if (workspacePath === firstPath) throw new Error("Index unavailable")
+        return createFakeIndex([], workspacePath)
+      },
+    })
+    await service.setWikiHome(parent)
+    await service.openWiki(secondPath)
+
+    assert.equal(await service.deleteWiki({ wikiId: secondId }), null)
+    assert.equal(service.getCurrentWiki(), null)
+    await assert.doesNotReject(access(firstPath))
+    await assert.rejects(access(secondPath))
+    await service.dispose()
+  })
+
   it("preserves the current wiki when moving another wiki to Trash", async () => {
     const parent = await temporaryDirectory()
     const activePath = join(parent, "Active Wiki")
@@ -255,6 +286,55 @@ describe("wiki service", () => {
     )
     allowTrash?.()
     await deletion
+    await service.dispose()
+  })
+
+  it("rejects deletion while an update session is being initialized", async () => {
+    const parent = await temporaryDirectory()
+    const wikiPath = join(parent, "Wiki")
+    await mkdir(wikiPath)
+    const wikiId = "123e4567-e89b-42d3-a456-426614174014"
+    let markProposalStarted: (() => void) | undefined
+    const proposalStarted = new Promise<void>((resolve) => {
+      markProposalStarted = resolve
+    })
+    let releaseProposal:
+      | ((proposal: WikiUpdateProposalSession) => void)
+      | undefined
+    const proposal = new Promise<WikiUpdateProposalSession>((resolve) => {
+      releaseProposal = resolve
+    })
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      moveToTrash: async (path) => await rm(path, { recursive: true }),
+      readWiki: async () => ({
+        id: wikiId,
+        domain: "Research",
+        setupStatus: "ready",
+      }),
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
+      createUpdateAgent: async () => createFakeUpdateAgent(),
+      createUpdateProposal: async () => {
+        markProposalStarted?.()
+        return await proposal
+      },
+    })
+    await service.setWikiHome(parent)
+    await service.openWiki(wikiPath)
+
+    const starting = service.startUpdate({ prompt: "Update the wiki" })
+    await proposalStarted
+    await assert.rejects(
+      service.deleteWiki({ wikiId }),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "busy"
+    )
+    releaseProposal?.(createFakeUpdateProposal([]))
+    const { sessionId } = await starting
+    await waitForUpdateReview(service)
+    await service.discardUpdate({ sessionId })
     await service.dispose()
   })
 
