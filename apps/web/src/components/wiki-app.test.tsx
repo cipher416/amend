@@ -286,6 +286,73 @@ describe("wiki app", () => {
     )
   })
 
+  it("prefills the update composer from a suggested prompt", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWikiApp(api, {
+      initialWikiId: wikiSummary.id,
+      initialFilePath: "concepts/write-ahead-logging.md",
+    })
+
+    await screen.findByRole("heading", { name: "Write-ahead logging" })
+    await user.click(screen.getByRole("button", { name: "Update" }))
+    await user.click(
+      screen.getByRole("button", {
+        name: "Clarify the argument and tighten the structure.",
+      })
+    )
+
+    const composer = screen.getByRole("textbox", {
+      name: "Update instructions",
+    })
+    expect((composer as HTMLTextAreaElement).value).toBe(
+      "Clarify the argument and tighten the structure."
+    )
+    expect(document.activeElement).toBe(composer)
+
+    await user.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() =>
+      expect(api.wiki.startUpdate).toHaveBeenCalledWith({
+        prompt: "Clarify the argument and tighten the structure.",
+        contextPath: "concepts/write-ahead-logging.md",
+      })
+    )
+  })
+
+  it.each([
+    {
+      status: "applying" as const,
+      expectedLabel: "Applying changes",
+      unexpectedLabel: "Ready to review",
+      proposal: reviewUpdateSession.proposal,
+    },
+    {
+      status: "failed" as const,
+      expectedLabel: "Update failed",
+      unexpectedLabel: "Ready",
+      proposal: undefined,
+    },
+  ])(
+    "announces the $status update status",
+    async ({ status, expectedLabel, unexpectedLabel, proposal }) => {
+      const user = userEvent.setup()
+      const api = createDesktopApi({
+        update: { ...reviewUpdateSession, status, proposal },
+      })
+      window.amend = api
+
+      renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+      await screen.findByRole("heading", { name: "Reliability Wiki" })
+      await user.click(screen.getByRole("button", { name: "Update" }))
+
+      await screen.findByText(expectedLabel)
+      expect(screen.queryByText(unexpectedLabel)).toBeNull()
+    }
+  )
+
   it("reviews a proposal lazily and applies it with completion feedback", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi({ update: reviewUpdateSession })

@@ -2,15 +2,33 @@ import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import type {
   AmendApi,
+  WikiUpdateActivity,
   WikiUpdateChangedFile,
+  WikiUpdateMessage,
   WikiUpdateSession,
 } from "@workspace/contract"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
+import { Bubble, BubbleContent } from "@workspace/ui/components/bubble"
 import { Button } from "@workspace/ui/components/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@workspace/ui/components/empty"
+import { Message, MessageContent } from "@workspace/ui/components/message"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@workspace/ui/components/message-scroller"
 import { Spinner } from "@workspace/ui/components/spinner"
 import { Textarea } from "@workspace/ui/components/textarea"
-import { useEffect, useRef, useState } from "react"
-import { Streamdown } from "streamdown"
+import { lazy, Suspense, useEffect, useRef, useState } from "react"
 
 import { errorMessage } from "@/lib/amend-client"
 import {
@@ -19,6 +37,16 @@ import {
   wikiFilesKey,
   wikiUpdateKey,
 } from "@/lib/wiki-queries"
+
+const updateSuggestions = [
+  "Clarify the argument and tighten the structure.",
+  "Find gaps and connect this with related ideas.",
+] as const
+
+const MessageResponse = lazy(async () => {
+  const module = await import("./ai-elements/message")
+  return { default: module.MessageResponse }
+})
 
 export function WikiUpdatePanel({
   desktop,
@@ -41,7 +69,7 @@ export function WikiUpdatePanel({
   const [submitting, setSubmitting] = useState(false)
   const [operationError, setOperationError] = useState<string>()
   const [selectedPath, setSelectedPath] = useState<string>()
-  const transcriptRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const proposal = session?.proposal
   const selectedFile = proposal?.changedFiles.find(
     ({ path }) => path === selectedPath
@@ -80,11 +108,6 @@ export function WikiUpdatePanel({
         : files[0]?.path
     )
   }, [proposal?.changedFiles])
-
-  useEffect(() => {
-    const element = transcriptRef.current
-    if (element) element.scrollTop = element.scrollHeight
-  }, [session?.revision])
 
   async function submitPrompt() {
     const prompt = draft.trim()
@@ -165,85 +188,110 @@ export function WikiUpdatePanel({
     }
   }
 
+  function chooseSuggestion(suggestion: string) {
+    setDraft(suggestion)
+    composerRef.current?.focus()
+  }
+
   const running = session?.status === "running"
   const visibleError = operationError ?? session?.error?.message
+  const statusLabel = updateStatusLabel(session)
+  const statusBusy =
+    session?.status === "running" || session?.status === "applying"
 
   return (
     <aside className="flex w-[min(42vw,34rem)] min-w-96 shrink-0 flex-col border-l bg-background">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <div className="min-w-0 flex-1">
           <h2 className="font-heading text-sm font-medium">Update wiki</h2>
           <p className="truncate text-[0.6875rem] text-muted-foreground">
             {contextPath ? `Context: ${contextPath}` : "Whole wiki"}
           </p>
         </div>
+        <div
+          aria-live="polite"
+          className="flex shrink-0 items-center gap-1.5 text-[0.625rem] text-muted-foreground"
+        >
+          {statusBusy ? (
+            <Spinner className="size-3" />
+          ) : (
+            <span
+              aria-hidden="true"
+              className={`size-1.5 rounded-full ${
+                session?.status === "failed"
+                  ? "bg-destructive"
+                  : proposal
+                    ? "bg-emerald-500"
+                    : "bg-muted-foreground/50"
+              }`}
+            />
+          )}
+          <span>{statusLabel}</span>
+        </div>
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
           Close
         </Button>
       </header>
 
-      <div
-        ref={transcriptRef}
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-5"
+      <MessageScrollerProvider
+        autoScroll
+        defaultScrollPosition="last-anchor"
+        scrollPreviousItemPeek={48}
       >
-        {session ? (
-          <div className="space-y-5">
-            {session.messages.map((message) =>
-              message.role === "user" ? (
-                <div
-                  key={message.id}
-                  className="ml-8 rounded-2xl border bg-muted/60 px-4 py-3 text-sm/relaxed"
-                >
-                  {message.content}
-                </div>
-              ) : message.content ? (
-                <Streamdown
-                  key={message.id}
-                  mode={message.status === "streaming" ? "streaming" : "static"}
-                  className="text-sm/relaxed text-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-3"
-                >
-                  {message.content}
-                </Streamdown>
-              ) : null
-            )}
-            {session.activity.length > 0 ? (
-              <div className="space-y-1 border-l pl-3">
-                {session.activity.map((activity) => (
-                  <div
-                    key={activity.id}
-                    className="flex items-center gap-2 text-[0.6875rem] text-muted-foreground"
-                  >
-                    {activity.status === "running" ? (
-                      <Spinner className="size-3" />
-                    ) : (
-                      <span
-                        className={
-                          activity.status === "failed"
-                            ? "size-1.5 rounded-full bg-destructive"
-                            : "size-1.5 rounded-full bg-emerald-500"
-                        }
-                      />
-                    )}
-                    <span>{activity.label}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="grid h-full place-items-center py-10 text-center">
-            <div className="max-w-64">
-              <p className="font-heading text-lg font-medium">
-                What should Amend change?
-              </p>
-              <p className="mt-2 text-xs/relaxed text-muted-foreground">
-                Ask for a precise edit or a wiki-wide reorganization. Changes
-                stay isolated until you review and apply them.
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
+        <MessageScroller className="flex-1">
+          <MessageScrollerViewport aria-label="Wiki update conversation">
+            <MessageScrollerContent className="gap-5 px-4 py-5">
+              {session ? (
+                <>
+                  {session.messages.map((message) =>
+                    message.role === "assistant" && !message.content ? null : (
+                      <MessageScrollerItem
+                        key={message.id}
+                        messageId={message.id}
+                        scrollAnchor={message.role === "user"}
+                      >
+                        <UpdateMessage message={message} />
+                      </MessageScrollerItem>
+                    )
+                  )}
+                  {session.activity.length > 0 ? (
+                    <MessageScrollerItem messageId={`activity:${session.id}`}>
+                      <UpdateActivity activity={session.activity} />
+                    </MessageScrollerItem>
+                  ) : null}
+                </>
+              ) : (
+                <MessageScrollerItem className="flex min-h-full">
+                  <Empty className="border-0">
+                    <EmptyHeader>
+                      <EmptyTitle>What should Amend change?</EmptyTitle>
+                      <EmptyDescription>
+                        Describe the outcome. Amend will work in isolation until
+                        you review and apply the result.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent className="max-w-72 flex-row flex-wrap justify-center">
+                      {updateSuggestions.map((suggestion) => (
+                        <Button
+                          key={suggestion}
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-auto min-h-7 text-wrap"
+                          onClick={() => chooseSuggestion(suggestion)}
+                        >
+                          {suggestion}
+                        </Button>
+                      ))}
+                    </EmptyContent>
+                  </Empty>
+                </MessageScrollerItem>
+              )}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton aria-label="Scroll to latest message" />
+        </MessageScroller>
+      </MessageScrollerProvider>
 
       {proposal ? (
         <section className="max-h-[42%] shrink-0 border-t">
@@ -334,32 +382,53 @@ export function WikiUpdatePanel({
         </section>
       ) : null}
 
-      <footer className="shrink-0 border-t p-3">
+      <footer className="shrink-0 border-t bg-background/95 p-3 backdrop-blur-sm">
         {visibleError ? (
           <Alert variant="destructive" className="mb-3">
             <AlertDescription>{visibleError}</AlertDescription>
           </Alert>
         ) : null}
-        <div className="rounded-xl border bg-muted/30 p-2 shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+        <form
+          className="rounded-xl border bg-muted/20 p-2 shadow-xs transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void submitPrompt()
+          }}
+        >
           <Textarea
+            ref={composerRef}
             aria-label="Update instructions"
+            aria-describedby="update-composer-hint"
             value={draft}
             disabled={running || submitting}
             placeholder={
-              session ? "Continue the update…" : "Ask Amend to update the wiki…"
+              running
+                ? "Amend is working…"
+                : session
+                  ? "Refine the update…"
+                  : "Describe the change you want…"
             }
-            className="min-h-20 border-0 bg-transparent p-2 shadow-none focus-visible:ring-0 dark:bg-transparent"
+            className="max-h-36 min-h-16 border-0 bg-transparent p-2 shadow-none focus-visible:ring-0 dark:bg-transparent"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
                 event.preventDefault()
                 void submitPrompt()
               }
             }}
           />
           <div className="flex items-center justify-between px-2 pb-1">
-            <p className="text-[0.625rem] text-muted-foreground">
-              Enter to send · Shift+Enter for newline
+            <p
+              id="update-composer-hint"
+              className="text-[0.625rem] text-muted-foreground"
+            >
+              {running
+                ? "You can stop this turn without discarding the session."
+                : "Enter to send · Shift+Enter for newline"}
             </p>
             {running ? (
               <Button
@@ -372,19 +441,103 @@ export function WikiUpdatePanel({
               </Button>
             ) : (
               <Button
-                type="button"
+                type="submit"
                 size="sm"
                 disabled={!draft.trim() || submitting}
-                onClick={submitPrompt}
               >
                 {submitting ? <Spinner /> : null}
                 Send
               </Button>
             )}
           </div>
-        </div>
+        </form>
       </footer>
     </aside>
+  )
+}
+
+function UpdateMessage({ message }: { message: WikiUpdateMessage }) {
+  return (
+    <Message align={message.role === "user" ? "end" : "start"}>
+      <MessageContent>
+        <Bubble
+          align={message.role === "user" ? "end" : "start"}
+          variant={message.role === "user" ? "muted" : "ghost"}
+          className={message.role === "assistant" ? "w-full" : undefined}
+        >
+          <BubbleContent
+            className={message.role === "assistant" ? "w-full" : undefined}
+          >
+            {message.role === "assistant" ? (
+              <Suspense
+                fallback={
+                  <span className="whitespace-pre-wrap">{message.content}</span>
+                }
+              >
+                <MessageResponse
+                  mode={message.status === "streaming" ? "streaming" : "static"}
+                >
+                  {message.content}
+                </MessageResponse>
+              </Suspense>
+            ) : (
+              message.content
+            )}
+          </BubbleContent>
+        </Bubble>
+      </MessageContent>
+    </Message>
+  )
+}
+
+function updateStatusLabel(session: WikiUpdateSession | null) {
+  if (!session) return "New update"
+  if (session.status === "review" && !session.proposal) return "Ready"
+
+  return {
+    running: "Working",
+    review: "Ready to review",
+    applying: "Applying changes",
+    failed: "Update failed",
+  }[session.status]
+}
+
+function UpdateActivity({
+  activity,
+}: {
+  activity: readonly WikiUpdateActivity[]
+}) {
+  return (
+    <section
+      aria-label="Update activity"
+      className="rounded-lg border bg-muted/20 px-3 py-2.5"
+    >
+      <p className="mb-2 text-[0.625rem] font-medium tracking-wide text-muted-foreground uppercase">
+        Work log
+      </p>
+      <div className="flex flex-col gap-1.5">
+        {activity.map((item) => (
+          <div
+            key={item.id}
+            className="flex items-center gap-2 text-[0.6875rem] text-muted-foreground"
+          >
+            {item.status === "running" ? (
+              <Spinner className="size-3" />
+            ) : (
+              <span
+                aria-hidden="true"
+                className={
+                  item.status === "failed"
+                    ? "size-1.5 rounded-full bg-destructive"
+                    : "size-1.5 rounded-full bg-emerald-500"
+                }
+              />
+            )}
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
