@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { wikiCurrentKey, wikisKey } from "@/lib/wiki-queries"
 
+import { AppNotice } from "./app-notice"
 import { WikiApp, WikiFileContent } from "./wiki-app"
 
 const routeHarness = vi.hoisted(() => ({
@@ -549,6 +550,9 @@ describe("wiki app", () => {
     await user.click(screen.getByRole("button", { name: "Move to Trash" }))
 
     await waitFor(() => expect(routeHarness.atHome).toBe(true))
+    expect(screen.getByRole("status").textContent).toBe(
+      `“${wikiSummary.name}” moved to Trash.`
+    )
   })
 
   it("keeps the Trash dialog open when deletion fails", async () => {
@@ -1090,7 +1094,12 @@ function renderWikiApp(
   })
   routeHarness.queryClient = queryClient
 
-  return render(<WikiRouteHarness />)
+  return render(
+    <>
+      <WikiRouteHarness />
+      <AppNotice />
+    </>
+  )
 }
 
 type MockAmendApi = AmendApi & {

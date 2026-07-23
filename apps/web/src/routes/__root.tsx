@@ -8,6 +8,8 @@ import {
 
 import appCss from "@workspace/ui/globals.css?url"
 
+import { AppNotice } from "@/components/app-notice"
+
 const themeScript = `(() => {
   let storedTheme
   try { storedTheme = localStorage.getItem("amend-theme") } catch {}
@@ -66,6 +68,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         {children}
+        <AppNotice />
         <Scripts />
       </body>
     </html>

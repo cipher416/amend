@@ -250,7 +250,12 @@ describe("first source workflow", () => {
     window.amend = api
     render(<WikiWorkflow />)
 
-    await screen.findByRole("heading", { name: "Create your wiki" })
+    await screen.findByRole("heading", { name: "Start a new wiki" })
+    expect(
+      screen.getByText(
+        "Choose where your wikis live, then add a document to get started."
+      )
+    ).toBeDefined()
     const input = document.querySelector<HTMLInputElement>('input[type="file"]')
     if (!input) throw new Error("Expected the document file input")
     expect(input.disabled).toBe(true)
@@ -344,7 +349,7 @@ describe("first source workflow", () => {
       screen.getByText("Your existing wiki is ready to browse.")
     ).toBeDefined()
     expect(
-      screen.queryByRole("heading", { name: "Create your wiki" })
+      screen.queryByRole("heading", { name: "Start a new wiki" })
     ).toBeNull()
   })
 
@@ -355,7 +360,20 @@ describe("first source workflow", () => {
     window.amend = api
     render(<WikiWorkflow createWiki />)
 
-    await screen.findByRole("heading", { name: "Create your wiki" })
+    await screen.findByRole("heading", { name: "Start a new wiki" })
+  })
+
+  it("uses resume-oriented copy for an existing wiki awaiting its first source", async () => {
+    const api = createDesktopApi({ wiki: wikiSummary })
+    window.amend = api
+    render(<WikiWorkflow />)
+
+    await screen.findByRole("heading", {
+      name: "Finish setting up your wiki",
+    })
+    expect(
+      screen.getByText("Add the first document to finish setting up this wiki.")
+    ).toBeDefined()
   })
 
   it("creates a sibling wiki only after its first source is selected", async () => {
@@ -388,6 +406,11 @@ describe("first source workflow", () => {
     render(<WikiWorkflow createWiki />)
 
     const home = await screen.findByLabelText("Wiki home")
+    expect(
+      screen.getByText(
+        "Add a document and Amend will turn it into a local, Git-backed wiki."
+      )
+    ).toBeDefined()
     expect(home.tagName).toBe("P")
     expect(screen.queryByRole("button", { name: "Wiki home" })).toBeNull()
   })
@@ -457,7 +480,7 @@ describe("Pi connection gate", () => {
       provider: "zai",
       model: "glm-5-turbo",
     })
-    await screen.findByRole("heading", { name: "Create your wiki" })
+    await screen.findByRole("heading", { name: "Start a new wiki" })
   })
 
   it("loads the provider models once OAuth completes", async () => {
@@ -760,7 +783,7 @@ function createJob(
 async function createWiki(
   user: ReturnType<typeof userEvent.setup>
 ): Promise<void> {
-  await screen.findByRole("heading", { name: "Create your wiki" })
+  await screen.findByRole("heading", { name: "Start a new wiki" })
   await user.click(screen.getByRole("button", { name: "Wiki home" }))
   await screen.findAllByText("/research")
   const input = document.querySelector<HTMLInputElement>('input[type="file"]')

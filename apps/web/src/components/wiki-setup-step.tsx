@@ -113,10 +113,14 @@ export function WikiSetupStep({
     <form className="py-2 sm:py-4" onSubmit={form.handleSubmit(onSubmit)}>
       <header className="mb-8 max-w-xl">
         <h1 className="font-heading text-3xl font-medium tracking-tight">
-          Create your wiki
+          {wikiLocked ? "Finish setting up your wiki" : "Start a new wiki"}
         </h1>
         <p className="mt-2 text-sm/relaxed text-muted-foreground">
-          Choose where your wikis live, then add the first document.
+          {wikiLocked
+            ? "Add the first document to finish setting up this wiki."
+            : home
+              ? "Add a document and Amend will turn it into a local, Git-backed wiki."
+              : "Choose where your wikis live, then add a document to get started."}
         </p>
       </header>
 
@@ -180,7 +184,7 @@ export function WikiSetupStep({
         </Field>
 
         {document ? (
-          <div className="transition-[opacity,transform] duration-[220ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:duration-150 motion-reduce:ease-out starting:translate-y-1 starting:opacity-0 motion-reduce:starting:translate-y-0">
+          <div className="flex flex-col gap-6 transition-[opacity,transform] duration-[220ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:duration-150 motion-reduce:ease-out starting:translate-y-1 starting:opacity-0 motion-reduce:starting:translate-y-0">
             <Controller
               name="wikiName"
               control={form.control}

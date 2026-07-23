@@ -68,6 +68,7 @@ import { SettingsMenu } from "./settings-menu"
 import { WikiAddDocument } from "./wiki-add-document"
 import { WikiAvatar } from "./wiki-avatar"
 import { WikiSearch } from "./wiki-search"
+import { showNotice } from "./app-notice"
 
 export function WikiSidebar({
   desktop,
@@ -270,6 +271,7 @@ function DeleteWikiDialog({
         return
       }
       const activeWiki = response.value
+      showNotice(`“${wiki.name}” moved to Trash.`)
       if (activeWiki) {
         await navigate({
           to: "/wiki/$wikiId",
