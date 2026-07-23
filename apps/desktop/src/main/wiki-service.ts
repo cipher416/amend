@@ -1127,8 +1127,15 @@ export class WikiService {
     expectedId?: string
   ): Promise<WikiSummary> {
     const context = await this.openWikiContext(wikiPath, expectedId)
-    await this.setActiveWiki(context)
-    return context.summary
+    try {
+      await this.setActiveWiki(context)
+      return context.summary
+    } catch (error) {
+      if (this.contexts.get(context.summary.id) !== context) {
+        await context.index.close().catch(() => undefined)
+      }
+      throw error
+    }
   }
 
   private async openWikiContext(

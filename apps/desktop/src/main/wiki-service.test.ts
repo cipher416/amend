@@ -156,6 +156,41 @@ describe("wiki service", () => {
     await service.dispose()
   })
 
+  it("closes the next wiki index when its activation cannot be persisted", async () => {
+    const parent = await temporaryDirectory()
+    const userDataPath = join(parent, "user-data")
+    const homeStatePath = join(userDataPath, "wikis", "home.json")
+    const firstPath = join(parent, "Alpha Wiki")
+    const secondPath = join(parent, "Beta Wiki")
+    await Promise.all([mkdir(firstPath), mkdir(secondPath)])
+    const firstId = "123e4567-e89b-42d3-a456-426614174015"
+    const secondId = "123e4567-e89b-42d3-a456-426614174016"
+    const calls: string[] = []
+    const service = new WikiService({
+      userDataPath,
+      skillPath: "/app/llm-wiki/SKILL.md",
+      moveToTrash: async (path) => await rm(path, { recursive: true }),
+      readWiki: async ({ wikiPath }) => ({
+        id: wikiPath === firstPath ? firstId : secondId,
+        domain: "Research",
+        setupStatus: "ready",
+      }),
+      openIndex: async ({ workspacePath }) => {
+        if (workspacePath === firstPath) {
+          await rm(homeStatePath)
+          await mkdir(homeStatePath)
+        }
+        return createFakeIndex(calls, workspacePath)
+      },
+    })
+    await service.setWikiHome(parent)
+    await service.openWiki(secondPath)
+
+    assert.equal(await service.deleteWiki({ wikiId: secondId }), null)
+    assert.ok(calls.includes(`close:${firstPath}`))
+    await service.dispose()
+  })
+
   it("preserves the current wiki when moving another wiki to Trash", async () => {
     const parent = await temporaryDirectory()
     const activePath = join(parent, "Active Wiki")
