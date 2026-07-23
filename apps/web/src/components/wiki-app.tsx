@@ -95,6 +95,7 @@ function WikiAppContent() {
               switching={busy === "switch"}
               loadingFiles={busy === "files"}
               running={running}
+              renameBlocked={running || update !== null}
             />
           }
         >

@@ -11,6 +11,7 @@ import {
   isPiSetDefaultModelInput,
   isReadWikiFileInput,
   isReadWikiUpdateDiffInput,
+  isRenameWikiInput,
   isStartWikiUpdateInput,
   isStartPiOAuthLoginInput,
   isThemeSource,
@@ -124,6 +125,14 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
       return await attempt(async () =>
         options.service.activateWiki(input.wikiId)
       )
+    })
+  )
+
+  ipcMain.handle(
+    amendChannels.renameWiki,
+    authorized(options, async (_event, input: unknown) => {
+      if (!isRenameWikiInput(input)) return invalidInput()
+      return await attempt(async () => options.service.renameWiki(input))
     })
   )
 
@@ -307,6 +316,7 @@ export function registerWikiIpc(options: WikiIpcOptions): () => void {
       amendChannels.getCurrentWiki,
       amendChannels.listWikis,
       amendChannels.activateWiki,
+      amendChannels.renameWiki,
       amendChannels.chooseSourceDocument,
       amendChannels.registerSourceDocument,
       amendChannels.startIngest,

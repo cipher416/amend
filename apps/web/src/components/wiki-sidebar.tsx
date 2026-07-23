@@ -4,8 +4,10 @@ import type {
   WikiListItem,
   WikiSummary,
 } from "@workspace/contract"
+import { isWikiName } from "@workspace/contract"
 import { useEffect, useState } from "react"
-import { Link, useNavigate } from "@tanstack/react-router"
+import type { FormEvent } from "react"
+import { Link, useNavigate, useRouter } from "@tanstack/react-router"
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
@@ -14,6 +16,15 @@ import {
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Badge } from "@workspace/ui/components/badge"
+import { Alert, AlertDescription } from "@workspace/ui/components/alert"
+import { Button } from "@workspace/ui/components/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@workspace/ui/components/dialog"
 import {
   Collapsible,
   CollapsibleContent,
@@ -30,6 +41,12 @@ import {
   DropdownMenuTrigger,
 } from "@workspace/ui/components/dropdown-menu"
 import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@workspace/ui/components/field"
+import { Input } from "@workspace/ui/components/input"
+import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
@@ -42,6 +59,9 @@ import {
   SidebarMenuSub,
 } from "@workspace/ui/components/sidebar"
 import { Spinner } from "@workspace/ui/components/spinner"
+
+import { errorMessage } from "@/lib/amend-client"
+import { wikiCurrentKey, wikisKey } from "@/lib/wiki-queries"
 
 import { ThemeMenu } from "./theme"
 import { SettingsMenu } from "./settings-menu"
@@ -58,6 +78,7 @@ export function WikiSidebar({
   switching,
   loadingFiles,
   running,
+  renameBlocked,
 }: {
   desktop: AmendApi
   wiki: WikiSummary
@@ -67,11 +88,18 @@ export function WikiSidebar({
   switching: boolean
   loadingFiles: boolean
   running: boolean
+  renameBlocked: boolean
 }) {
   return (
     <>
       <SidebarHeader>
-        <WikiPicker wiki={wiki} wikis={wikis} switching={switching} />
+        <WikiPicker
+          desktop={desktop}
+          wiki={wiki}
+          wikis={wikis}
+          switching={switching}
+          renameBlocked={renameBlocked}
+        />
         <WikiSearch desktop={desktop} wiki={wiki} />
         <WikiAddDocument
           key={wiki.id}
@@ -111,67 +139,201 @@ export function WikiSidebar({
 }
 
 function WikiPicker({
+  desktop,
   wiki,
   wikis,
   switching,
+  renameBlocked,
 }: {
+  desktop: AmendApi
   wiki: WikiSummary
   wikis: readonly WikiListItem[]
   switching: boolean
+  renameBlocked: boolean
 }) {
   const navigate = useNavigate()
+  const [renameOpen, setRenameOpen] = useState(false)
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <SidebarMenuButton
-            size="lg"
-            disabled={switching}
-            className="data-[popup-open]:[&>svg:last-child]:rotate-180"
-          />
-        }
-      >
-        <WikiAvatar wikiId={wiki.id} className="size-6 shrink-0 rounded-md" />
-        <span>{wiki.name}</span>
-        <HugeiconsIcon
-          icon={ArrowDown01Icon}
-          className="ml-auto transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
-        />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent>
-        <DropdownMenuRadioGroup
-          value={wiki.id}
-          onValueChange={(wikiId) => {
-            void navigate({ to: "/wiki/$wikiId", params: { wikiId } })
-          }}
-        >
-          <DropdownMenuLabel>Switch wiki</DropdownMenuLabel>
-          {wikis.map((item) => (
-            <DropdownMenuRadioItem key={item.id} value={item.id}>
-              <WikiAvatar
-                wikiId={item.id}
-                className="size-5 shrink-0 rounded-sm"
-              />
-              <span>{item.name}</span>
-              {item.running ? (
-                <Badge className="mr-4 ml-auto" variant="secondary">
-                  Running
-                </Badge>
-              ) : null}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() =>
-            void navigate({ to: "/", search: { createWiki: true } })
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <SidebarMenuButton
+              size="lg"
+              disabled={switching}
+              className="data-[popup-open]:[&>svg:last-child]:rotate-180"
+            />
           }
         >
-          Create wiki
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          <WikiAvatar wikiId={wiki.id} className="size-6 shrink-0 rounded-md" />
+          <span>{wiki.name}</span>
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            className="ml-auto transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuRadioGroup
+            value={wiki.id}
+            onValueChange={(wikiId) => {
+              void navigate({ to: "/wiki/$wikiId", params: { wikiId } })
+            }}
+          >
+            <DropdownMenuLabel>Switch wiki</DropdownMenuLabel>
+            {wikis.map((item) => (
+              <DropdownMenuRadioItem key={item.id} value={item.id}>
+                <WikiAvatar
+                  wikiId={item.id}
+                  className="size-5 shrink-0 rounded-sm"
+                />
+                <span>{item.name}</span>
+                {item.running ? (
+                  <Badge className="mr-4 ml-auto" variant="secondary">
+                    Running
+                  </Badge>
+                ) : null}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={renameBlocked}
+            onClick={() => setRenameOpen(true)}
+          >
+            Rename wiki
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() =>
+              void navigate({ to: "/", search: { createWiki: true } })
+            }
+          >
+            Create wiki
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <RenameWikiDialog
+        desktop={desktop}
+        wiki={wiki}
+        open={renameOpen}
+        onOpenChange={setRenameOpen}
+      />
+    </>
+  )
+}
+
+function RenameWikiDialog({
+  desktop,
+  wiki,
+  open,
+  onOpenChange,
+}: {
+  desktop: AmendApi
+  wiki: WikiSummary
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const queryClient = useRouter().options.context.queryClient
+  const [name, setName] = useState(wiki.name)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string>()
+  const valid = isWikiName(name)
+  const unchanged = name === wiki.name
+
+  function handleOpenChange(nextOpen: boolean) {
+    onOpenChange(nextOpen)
+    if (nextOpen) {
+      setName(wiki.name)
+      setError(undefined)
+    }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!valid || unchanged || submitting) return
+    setSubmitting(true)
+    setError(undefined)
+    try {
+      const response = await desktop.wikis.rename({
+        wikiId: wiki.id,
+        name,
+      })
+      if (!response.ok) {
+        setError(response.error.message)
+        return
+      }
+      const renamed = response.value
+      queryClient.setQueryData(wikiCurrentKey, renamed)
+      queryClient.setQueryData<readonly WikiListItem[]>(wikisKey, (items) =>
+        items?.map((item) =>
+          item.id === renamed.id
+            ? {
+                ...item,
+                name: renamed.name,
+                displayPath: renamed.displayPath,
+              }
+            : item
+        )
+      )
+      void queryClient.invalidateQueries({ queryKey: wikisKey })
+      onOpenChange(false)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Rename wiki</DialogTitle>
+          <DialogDescription>
+            This also changes the wiki&apos;s local folder name.
+          </DialogDescription>
+        </DialogHeader>
+        <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+          <Field data-invalid={!valid || undefined}>
+            <FieldLabel htmlFor="rename-wiki-name">Wiki name</FieldLabel>
+            <Input
+              id="rename-wiki-name"
+              autoComplete="off"
+              autoFocus
+              maxLength={80}
+              value={name}
+              aria-invalid={!valid}
+              disabled={submitting}
+              onChange={(event) => setName(event.target.value)}
+            />
+            {!valid ? (
+              <FieldDescription>
+                Use 1–80 characters without slashes or surrounding spaces.
+              </FieldDescription>
+            ) : null}
+          </Field>
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={submitting}
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!valid || unchanged || submitting}>
+              {submitting ? <Spinner data-icon="inline-start" /> : null}
+              Rename
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 

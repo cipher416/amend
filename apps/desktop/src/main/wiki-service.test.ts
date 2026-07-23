@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { access, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, it } from "vitest"
@@ -30,6 +30,219 @@ afterEach(async () => {
 })
 
 describe("wiki service", () => {
+  it("renames a wiki directory while preserving its identity", async () => {
+    const parent = await temporaryDirectory()
+    const wikiId = "123e4567-e89b-42d3-a456-426614174003"
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      createEngine: () => createFakeEngine([], []),
+      readWiki: async ({ wikiPath }) => {
+        if (
+          wikiPath !== join(parent, "Reliability Wiki") &&
+          wikiPath !== join(parent, "Operations Wiki")
+        ) {
+          throw new Error("Not a wiki")
+        }
+        return {
+          id: wikiId,
+          domain: "Database reliability",
+          setupStatus: "ready",
+        }
+      },
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
+    })
+
+    await service.setWikiHome(parent)
+    const original = await service.createWiki({
+      name: "Reliability Wiki",
+      domain: "Database reliability",
+    })
+
+    const renamed = await service.renameWiki({
+      wikiId: original.id,
+      name: "Operations Wiki",
+    })
+
+    assert.equal(renamed.id, original.id)
+    assert.equal(renamed.name, "Operations Wiki")
+    assert.equal(renamed.displayPath, join(parent, "Operations Wiki"))
+    assert.deepEqual(
+      await service.renameWiki({
+        wikiId: original.id,
+        name: "Operations Wiki",
+      }),
+      renamed
+    )
+    await assert.rejects(access(join(parent, "Reliability Wiki")))
+    await assert.doesNotReject(access(renamed.displayPath))
+    assert.deepEqual(await service.listWikis(), [
+      {
+        id: original.id,
+        name: "Operations Wiki",
+        displayPath: renamed.displayPath,
+        active: true,
+        running: false,
+      },
+    ])
+    await service.dispose()
+  })
+
+  it("rejects a wiki rename when the destination already exists", async () => {
+    const parent = await temporaryDirectory()
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      createEngine: () => createFakeEngine([], []),
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
+    })
+
+    await service.setWikiHome(parent)
+    const wiki = await service.createWiki({
+      name: "Reliability Wiki",
+      domain: "Database reliability",
+    })
+    await mkdir(join(parent, "Operations Wiki"))
+
+    await assert.rejects(
+      service.renameWiki({ wikiId: wiki.id, name: "Operations Wiki" }),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "invalid-location"
+    )
+    assert.equal(service.getCurrentWiki()?.name, "Reliability Wiki")
+    await service.dispose()
+  })
+
+  it("supports changing only the case of a wiki name", async () => {
+    const parent = await temporaryDirectory()
+    const originalPath = join(parent, "Research Wiki")
+    const renamedPath = join(parent, "Research wiki")
+    await mkdir(originalPath)
+    const wikiId = "123e4567-e89b-42d3-a456-426614174012"
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      readWiki: async ({ wikiPath }) => {
+        if (wikiPath !== originalPath && wikiPath !== renamedPath) {
+          throw new Error("Not a wiki")
+        }
+        return { id: wikiId, domain: "Research", setupStatus: "ready" }
+      },
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
+    })
+
+    await service.setWikiHome(parent)
+    await service.openWiki(originalPath)
+
+    const renamed = await service.renameWiki({
+      wikiId,
+      name: "Research wiki",
+    })
+
+    assert.equal(renamed.name, "Research wiki")
+    assert.equal(renamed.displayPath, renamedPath)
+    await assert.doesNotReject(access(renamedPath))
+    await service.dispose()
+  })
+
+  it("renames an inactive wiki without changing the active wiki", async () => {
+    const parent = await temporaryDirectory()
+    const firstPath = join(parent, "First Wiki")
+    const renamedFirstPath = join(parent, "Renamed First Wiki")
+    const secondPath = join(parent, "Second Wiki")
+    await Promise.all([mkdir(firstPath), mkdir(secondPath)])
+    const firstId = "123e4567-e89b-42d3-a456-426614174010"
+    const secondId = "123e4567-e89b-42d3-a456-426614174011"
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      readWiki: async ({ wikiPath }) => {
+        if (wikiPath === firstPath || wikiPath === renamedFirstPath) {
+          return { id: firstId, domain: "First", setupStatus: "ready" }
+        }
+        if (wikiPath === secondPath) {
+          return { id: secondId, domain: "Second", setupStatus: "ready" }
+        }
+        throw new Error("Not a wiki")
+      },
+      openIndex: async ({ workspacePath }) =>
+        createFakeIndex([], workspacePath),
+    })
+
+    await service.setWikiHome(parent)
+    await service.openWiki(firstPath)
+    await service.openWiki(secondPath)
+
+    const renamed = await service.renameWiki({
+      wikiId: firstId,
+      name: "Renamed First Wiki",
+    })
+
+    assert.equal(renamed.id, firstId)
+    assert.equal(renamed.displayPath, renamedFirstPath)
+    assert.equal(service.getCurrentWiki()?.id, secondId)
+    assert.deepEqual(
+      (await service.listWikis()).map(({ id, name, active }) => ({
+        id,
+        name,
+        active,
+      })),
+      [
+        { id: firstId, name: "Renamed First Wiki", active: false },
+        { id: secondId, name: "Second Wiki", active: true },
+      ]
+    )
+    await service.dispose()
+  })
+
+  it("restores the original wiki name when reopening the renamed path fails", async () => {
+    const parent = await temporaryDirectory()
+    const originalPath = join(parent, "Reliability Wiki")
+    const renamedPath = join(parent, "Operations Wiki")
+    const service = new WikiService({
+      userDataPath: join(parent, "user-data"),
+      skillPath: "/app/llm-wiki/SKILL.md",
+      createEngine: () => createFakeEngine([], []),
+      readWiki: async ({ wikiPath }) => {
+        if (wikiPath !== originalPath && wikiPath !== renamedPath) {
+          throw new Error("Not a wiki")
+        }
+        return {
+          id: "123e4567-e89b-42d3-a456-426614174003",
+          domain: "Database reliability",
+          setupStatus: "ready",
+        }
+      },
+      openIndex: async ({ workspacePath }) => {
+        if (workspacePath === renamedPath) {
+          throw new Error("Cannot open renamed path")
+        }
+        return createFakeIndex([], workspacePath)
+      },
+    })
+
+    await service.setWikiHome(parent)
+    const wiki = await service.createWiki({
+      name: "Reliability Wiki",
+      domain: "Database reliability",
+    })
+
+    await assert.rejects(
+      service.renameWiki({ wikiId: wiki.id, name: "Operations Wiki" }),
+      (error: unknown) =>
+        error instanceof WikiServiceError &&
+        error.code === "wiki-open-failed" &&
+        error.message.includes("original name was restored")
+    )
+    await assert.doesNotReject(access(originalPath))
+    await assert.rejects(access(renamedPath))
+    assert.equal(service.getCurrentWiki()?.name, "Reliability Wiki")
+    await service.dispose()
+  })
+
   it("creates a wiki as a sibling in the selected Amend library", async () => {
     const parent = await temporaryDirectory()
     const service = new WikiService({
@@ -244,6 +457,14 @@ describe("wiki service", () => {
       objective: "Capture it",
     })
     assert.equal(service.getCurrentIngest()?.status, "running")
+    await assert.rejects(
+      service.renameWiki({
+        wikiId: service.getCurrentWiki()!.id,
+        name: "Renamed Wiki",
+      }),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "busy"
+    )
     service.cancelIngest({ jobId: started.jobId })
 
     const job = await waitForTerminalJob(service)
@@ -783,6 +1004,14 @@ describe("wiki service", () => {
         path: "concepts/page.md",
       }),
       { path: "concepts/page.md", patch: "@@ -1 +1 @@" }
+    )
+    await assert.rejects(
+      service.renameWiki({
+        wikiId: service.getCurrentWiki()!.id,
+        name: "Renamed Wiki",
+      }),
+      (error: unknown) =>
+        error instanceof WikiServiceError && error.code === "busy"
     )
 
     const result = await service.applyUpdate({ sessionId: session.id })

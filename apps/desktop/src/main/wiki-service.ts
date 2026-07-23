@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto"
-import { lstat, mkdir, readdir, readFile, realpath, rm } from "node:fs/promises"
+import {
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+} from "node:fs/promises"
 import { basename, extname, join, relative, resolve } from "node:path"
 
 import { isReadWikiFileInput } from "@workspace/contract"
@@ -11,6 +19,7 @@ import type {
   CreateWikiInput,
   IngestDocumentInput,
   IngestPastedSourceResult,
+  RenameWikiInput,
   ReadWikiFileInput,
   ReadWikiUpdateDiffInput,
   SourceDocumentSelection,
@@ -274,6 +283,108 @@ export class WikiService {
         this.updates.get(wiki.id)?.snapshot.status === "running" ||
         false,
     }))
+  }
+
+  async renameWiki(input: RenameWikiInput): Promise<WikiSummary> {
+    this.assertOpen()
+    if (this.lifecycleOperation) {
+      throw new WikiServiceError("busy", "Amend is already working.")
+    }
+    const operation = Promise.resolve().then(async () => {
+      const home = await this.home.read()
+      if (!home) {
+        throw new WikiServiceError(
+          "invalid-location",
+          "Choose an Amend home before renaming a wiki."
+        )
+      }
+      const record = (await this.discoverWikis()).find(
+        ({ id }) => id === input.wikiId
+      )
+      if (!record) {
+        throw new WikiServiceError("invalid-input", "The wiki was not found.")
+      }
+      if (this.jobs.get(input.wikiId)?.status === "running") {
+        throw new WikiServiceError(
+          "busy",
+          "Wait for the wiki ingest to finish before renaming it."
+        )
+      }
+      if (this.updates.has(input.wikiId)) {
+        throw new WikiServiceError(
+          "busy",
+          "Finish or discard the wiki update before renaming it."
+        )
+      }
+
+      const sourcePath = record.path
+      if (basename(sourcePath) === input.name) {
+        const existing = this.contexts.get(input.wikiId)
+        if (existing) return existing.summary
+        const context = await this.openWikiContext(sourcePath, input.wikiId)
+        await this.storeWikiContext(context, false)
+        return context.summary
+      }
+
+      const targetPath = join(home.wikiDirectory, input.name)
+      await assertRenameTargetAvailable(sourcePath, targetPath)
+      const wasActive = this.active?.summary.id === input.wikiId
+      try {
+        await rename(sourcePath, targetPath)
+      } catch (error) {
+        throw new WikiServiceError(
+          "invalid-location",
+          "The wiki folder could not be renamed.",
+          { cause: error }
+        )
+      }
+
+      let renamedContext: ActiveWiki | undefined
+      try {
+        const canonicalTarget = await realpath(targetPath)
+        renamedContext = await this.openWikiContext(
+          canonicalTarget,
+          input.wikiId
+        )
+        await this.storeWikiContext(renamedContext, wasActive)
+        return renamedContext.summary
+      } catch (error) {
+        if (
+          renamedContext &&
+          this.contexts.get(input.wikiId) !== renamedContext
+        ) {
+          await renamedContext.index.close().catch(() => undefined)
+        }
+        let recoveryError: unknown
+        try {
+          await rename(targetPath, sourcePath)
+          const restored = await this.openWikiContext(sourcePath, input.wikiId)
+          await this.storeWikiContext(restored, wasActive)
+        } catch (cause) {
+          recoveryError = cause
+        }
+        if (recoveryError) {
+          throw new WikiServiceError(
+            "wiki-open-failed",
+            "The wiki was renamed, but it could not be reopened or restored.",
+            { cause: recoveryError }
+          )
+        }
+        throw new WikiServiceError(
+          "wiki-open-failed",
+          "The wiki could not be reopened, so its original name was restored.",
+          { cause: error }
+        )
+      }
+    })
+    this.lifecycleOperation = operation
+    try {
+      return await operation
+    } finally {
+      if (this.lifecycleOperation === operation) {
+        this.lifecycleOperation = undefined
+      }
+    }
   }
 
   async activateWiki(wikiId: string): Promise<WikiSummary> {
@@ -907,6 +1018,15 @@ export class WikiService {
     workspacePath: string,
     expectedId?: string
   ): Promise<WikiSummary> {
+    const context = await this.openWikiContext(workspacePath, expectedId)
+    await this.setActiveWiki(context)
+    return context.summary
+  }
+
+  private async openWikiContext(
+    workspacePath: string,
+    expectedId?: string
+  ): Promise<ActiveWiki> {
     let index: WikiIndex | undefined
     try {
       const canonicalPath = await realpath(resolve(workspacePath))
@@ -918,8 +1038,7 @@ export class WikiService {
       }
       const existing = this.contexts.get(wiki.id)
       if (existing?.workspacePath === canonicalPath) {
-        await this.setActiveWiki(existing)
-        return existing.summary
+        return existing
       }
       index = await this.openWorkspaceIndex(canonicalPath, wiki.id, existing)
       const refresh = await index.refresh()
@@ -931,12 +1050,11 @@ export class WikiService {
         commitHash: refresh.commitHash,
         setupStatus: wiki.setupStatus,
       }
-      await this.setActiveWiki({
+      return {
         summary,
         workspacePath: canonicalPath,
         index,
-      })
-      return summary
+      }
     } catch (error) {
       await index?.close().catch(() => undefined)
       if (error instanceof WikiServiceError) throw error
@@ -952,6 +1070,23 @@ export class WikiService {
         "The wiki could not be opened.",
         { cause: error }
       )
+    }
+  }
+
+  private async storeWikiContext(
+    candidate: ActiveWiki,
+    makeActive: boolean
+  ): Promise<void> {
+    if (makeActive) {
+      await this.setActiveWiki(candidate)
+      return
+    }
+    const replaced = this.contexts.get(candidate.summary.id)
+    this.contexts.set(candidate.summary.id, candidate)
+    if (replaced && replaced !== candidate) {
+      await replaced.index.close().catch((error: unknown) => {
+        console.error("[amend] failed to close a replaced wiki index:", error)
+      })
     }
   }
 
@@ -1720,6 +1855,28 @@ function wikiFileMediaType(path: string): WikiFileContent["mediaType"] {
 async function assertTargetDoesNotExist(path: string): Promise<void> {
   try {
     await lstat(path)
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return
+    throw new WikiServiceError(
+      "invalid-location",
+      "The wiki location could not be checked.",
+      { cause: error }
+    )
+  }
+  throw new WikiServiceError(
+    "invalid-location",
+    "A file or folder already exists at that wiki location."
+  )
+}
+
+async function assertRenameTargetAvailable(
+  sourcePath: string,
+  targetPath: string
+): Promise<void> {
+  const sourceCanonicalPath = await realpath(sourcePath)
+  try {
+    const targetCanonicalPath = await realpath(targetPath)
+    if (targetCanonicalPath === sourceCanonicalPath) return
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") return
     throw new WikiServiceError(

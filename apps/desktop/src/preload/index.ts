@@ -44,6 +44,7 @@ import type {
   PiSetDefaultModelInput,
   ReadWikiFileInput,
   ReadWikiUpdateDiffInput,
+  RenameWikiInput,
   StartWikiUpdateInput,
   StartPiOAuthLoginInput,
   ThemeSource,
@@ -66,6 +67,8 @@ const wikis = Object.freeze({
   list: () => invoke(amendChannels.listWikis, isWikiListItems),
   activate: (input: ActivateWikiInput) =>
     invoke(amendChannels.activateWiki, isWikiSummary, input),
+  rename: (input: RenameWikiInput) =>
+    invoke(amendChannels.renameWiki, isWikiSummary, input),
 })
 
 const appearance = Object.freeze({

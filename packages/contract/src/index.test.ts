@@ -14,6 +14,7 @@ import {
   isPiSetDefaultModelInput,
   isReadWikiFileInput,
   isReadWikiUpdateDiffInput,
+  isRenameWikiInput,
   isStartWikiUpdateInput,
   isStartPiOAuthLoginInput,
   isThemeSource,
@@ -52,6 +53,7 @@ describe("desktop contract validation", () => {
       getCurrentWiki: "amend:wikis:current",
       listWikis: "amend:wikis:list",
       activateWiki: "amend:wikis:activate",
+      renameWiki: "amend:wikis:rename",
       setAppearanceTheme: "amend:appearance:set-theme",
       getProviderStatus: "amend:providers:status",
       listProviders: "amend:providers:list",
@@ -85,6 +87,12 @@ describe("desktop contract validation", () => {
     expect(isWikiSearchInput({ query: "attention", scope: "pages" })).toBe(true)
     expect(isCancelIngestInput({ jobId: "ingest_12345678" })).toBe(true)
     expect(isActivateWikiInput({ wikiId: "wiki_12345678" })).toBe(true)
+    expect(
+      isRenameWikiInput({
+        wikiId: "wiki_12345678",
+        name: "Renamed Research",
+      })
+    ).toBe(true)
     expect(isReadWikiFileInput({ path: "concepts/cache.md" })).toBe(true)
     expect(
       isStartWikiUpdateInput({
@@ -127,6 +135,25 @@ describe("desktop contract validation", () => {
     expect(isWikiSearchInput({ query: "wiki", tags: ["Not Safe"] })).toBe(false)
     expect(isCancelIngestInput({ jobId: "../other-job" })).toBe(false)
     expect(isActivateWikiInput({ wikiId: "../other-wiki" })).toBe(false)
+    expect(
+      isRenameWikiInput({
+        wikiId: "wiki_12345678",
+        name: "../escape",
+      })
+    ).toBe(false)
+    expect(
+      isRenameWikiInput({
+        wikiId: "../other-wiki",
+        name: "Research",
+      })
+    ).toBe(false)
+    expect(
+      isRenameWikiInput({
+        wikiId: "wiki_12345678",
+        name: "Research",
+        extra: true,
+      })
+    ).toBe(false)
     expect(
       isActivateWikiInput({
         wikiId: "wiki_12345678",

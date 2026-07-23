@@ -559,6 +559,13 @@ function createDesktopApi(
         }
         return success(wiki ?? wikiSummary)
       }),
+      rename: vi.fn(async ({ name }) =>
+        success({
+          ...(wiki ?? wikiSummary),
+          name,
+          displayPath: `/research/${name}`,
+        })
+      ),
     },
     wiki: {
       chooseDocument: vi.fn(async () =>

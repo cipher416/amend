@@ -434,6 +434,76 @@ describe("wiki app", () => {
     expect(routeHarness.creatingWiki).toBe(true)
   })
 
+  it("renames the current wiki from the wiki picker without navigating", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await user.click(await screen.findByRole("button", { name: "Rename wiki" }))
+    const name = screen.getByLabelText("Wiki name")
+    expect((name as HTMLInputElement).value).toBe(wikiSummary.name)
+    expect(
+      screen.getByText("This also changes the wiki's local folder name.")
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Rename" }).hasAttribute("disabled")
+    ).toBe(true)
+
+    await user.clear(name)
+    await user.type(name, "Operations Wiki")
+    await user.click(screen.getByRole("button", { name: "Rename" }))
+
+    await waitFor(() =>
+      expect(api.wikis.rename).toHaveBeenCalledWith({
+        wikiId: wikiSummary.id,
+        name: "Operations Wiki",
+      })
+    )
+    expect(routeHarness.wikiId).toBe(wikiSummary.id)
+    expect(await screen.findByText("Operations Wiki")).toBeTruthy()
+  })
+
+  it("disables renaming while the current wiki is busy", async () => {
+    const api = createDesktopApi({ activeWikiRunning: true })
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    expect(
+      (await screen.findByRole("button", { name: "Rename wiki" })).hasAttribute(
+        "disabled"
+      )
+    ).toBe(true)
+  })
+
+  it("keeps the rename dialog open when renaming fails", async () => {
+    const user = userEvent.setup()
+    const api = createDesktopApi()
+    api.wikis.rename = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: "invalid-location" as const,
+        message: "A wiki already uses that name.",
+      },
+    }))
+    window.amend = api
+
+    renderWikiApp(api, { initialWikiId: wikiSummary.id })
+
+    await user.click(await screen.findByRole("button", { name: "Rename wiki" }))
+    const name = screen.getByLabelText("Wiki name")
+    await user.clear(name)
+    await user.type(name, "Operations Wiki")
+    await user.click(screen.getByRole("button", { name: "Rename" }))
+
+    expect(
+      await screen.findByText("A wiki already uses that name.")
+    ).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "Rename wiki" })).toBeTruthy()
+  })
+
   it("adds a document with editable wiki guidance", async () => {
     const user = userEvent.setup()
     const api = createDesktopApi()
@@ -861,6 +931,13 @@ function createDesktopApi({
         ])
       ),
       activate: vi.fn(async () => success(wikiSummary)),
+      rename: vi.fn(async ({ name }) =>
+        success({
+          ...wikiSummary,
+          name,
+          displayPath: `/research/${name}`,
+        })
+      ),
     },
     providers: {
       status: vi.fn(async () => success({ configured: true })),

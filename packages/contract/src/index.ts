@@ -50,6 +50,11 @@ export interface ActivateWikiInput {
   wikiId: string
 }
 
+export interface RenameWikiInput {
+  wikiId: string
+  name: string
+}
+
 export interface WikiSummary {
   id: string
   name: string
@@ -362,6 +367,7 @@ export interface AmendApi {
     current: () => Promise<AmendResult<WikiSummary | null>>
     list: () => Promise<AmendResult<readonly WikiListItem[]>>
     activate: (input: ActivateWikiInput) => Promise<AmendResult<WikiSummary>>
+    rename: (input: RenameWikiInput) => Promise<AmendResult<WikiSummary>>
   }
   readonly providers: {
     status: () => Promise<AmendResult<PiConnectionStatus>>
@@ -447,6 +453,10 @@ const wikiNameSchema = Type.Refine(
     !/[\\/\0]/.test(value),
   () => "Wiki name must be a safe directory name"
 )
+
+export function isWikiName(value: unknown): value is string {
+  return Value.Check(wikiNameSchema, value)
+}
 const wikiPageTypeSchema = Type.Union([
   Type.Literal("entity"),
   Type.Literal("concept"),
@@ -478,6 +488,14 @@ export const activateWikiInputSchema = Type.Object(
       maxLength: 128,
       pattern: "^[a-zA-Z0-9_-]+$",
     }),
+  },
+  { additionalProperties: false }
+)
+
+export const renameWikiInputSchema = Type.Object(
+  {
+    wikiId: activateWikiInputSchema.properties.wikiId,
+    name: wikiNameSchema,
   },
   { additionalProperties: false }
 )
@@ -614,6 +632,10 @@ export function isActivateWikiInput(
   value: unknown
 ): value is ActivateWikiInput {
   return Value.Check(activateWikiInputSchema, value)
+}
+
+export function isRenameWikiInput(value: unknown): value is RenameWikiInput {
+  return Value.Check(renameWikiInputSchema, value)
 }
 
 export function isIngestDocumentInput(
