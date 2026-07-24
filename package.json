@@ -11,9 +11,15 @@
     "format:check": "oxfmt --check .",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "test:release": "node --test scripts/release-lib.test.mjs",
+    "verify": "pnpm test:release && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "eval:wiki": "pnpm --filter @workspace/evals eval:wiki",
     "eval:wiki-update": "pnpm --filter @workspace/evals eval:wiki-update",
-    "package:desktop": "pnpm --filter web build && pnpm --filter desktop package"
+    "package:desktop": "pnpm --filter web build && pnpm --filter desktop package",
+    "make:desktop": "pnpm --filter web build && pnpm --filter desktop make",
+    "release:verify": "node scripts/release.mjs verify",
+    "release:collect": "node scripts/release.mjs collect",
+    "release:checksums": "node scripts/release.mjs checksums"
   },
   "devDependencies": {
     "lefthook": "^2.1.10",

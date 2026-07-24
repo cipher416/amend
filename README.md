@@ -134,8 +134,10 @@ pnpm lint               # Run Oxlint
 pnpm lint:fix           # Apply safe Oxlint fixes
 pnpm format             # Format sources with Oxfmt
 pnpm format:check       # Check formatting without writing
+pnpm verify             # Run all deterministic CI checks
 pnpm build              # Build all packages
 pnpm package:desktop    # Create an unpacked desktop application
+pnpm make:desktop       # Create a platform-native ZIP distributable
 ```
 
 The unpacked application is written beneath `apps/desktop/out/`.
@@ -159,6 +161,34 @@ started.
 Keep Git, filesystem, SQLite, credentials, and model access in the Electron
 main process behind the typed preload IPC boundary. Do not introduce runtime
 server functions for desktop capabilities.
+
+### Releases
+
+Pull requests and pushes to `main` run formatting, linting, typechecking,
+tests, a production build, and a Linux packaging smoke test.
+
+Tags matching `v*.*.*` start the draft release workflow. The workflow:
+
+1. Requires the tag to be a semantic version such as `v0.1.0-alpha.1`.
+2. Requires the root and desktop package versions to match the tag.
+3. Repeats all deterministic verification.
+4. Creates unsigned ZIP distributables on native Linux, macOS, and Windows
+   runners.
+5. Generates `SHA256SUMS.txt`.
+6. Creates a draft GitHub prerelease for manual review.
+
+To prepare a release, update the `version` in `package.json` and
+`apps/desktop/package.json`, merge that change, then tag the release commit:
+
+```bash
+git tag v0.1.0-alpha.1
+git push origin v0.1.0-alpha.1
+```
+
+Publishing the draft remains a manual GitHub action. Do not publish macOS or
+Windows builds as stable releases until code signing is configured. Auto-update
+support is intentionally deferred until the artifact formats and signing flow
+are stable.
 
 ### Live evaluations
 

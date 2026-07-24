@@ -1,0 +1,27 @@
+name: Set up Amend workspace
+description: Install the pinned Node.js and pnpm toolchain and workspace dependencies.
+
+inputs:
+  install-dependencies:
+    description: Whether to enable pnpm and install workspace dependencies.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: 22.23.1
+        package-manager-cache: false
+
+    - name: Enable pnpm
+      if: inputs.install-dependencies == 'true'
+      shell: bash
+      run: corepack enable
+
+    - name: Install dependencies
+      if: inputs.install-dependencies == 'true'
+      shell: bash
+      run: pnpm install --frozen-lockfile
