@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url"
 
 import { app, BrowserWindow, Menu, nativeTheme, session, shell } from "electron"
 
+import { configureDesktopGitRuntime } from "./git-runtime"
 import { registerAppearanceIpc, registerPiIpc, registerWikiIpc } from "./ipc"
 import { PiCredentialService } from "./pi-credential-service"
 import { registerRendererProtocol } from "./renderer-protocol"
@@ -103,6 +104,11 @@ function isExternalUrl(url: string): boolean {
 }
 
 app.whenReady().then(async () => {
+  configureDesktopGitRuntime({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+  })
+
   if (app.isPackaged) {
     await registerRendererProtocol(path.join(process.resourcesPath, "client"))
   }

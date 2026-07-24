@@ -57,6 +57,9 @@ jobs:
       - name: Make desktop distributable
         run: pnpm make:desktop
 
+      - name: Smoke test bundled Git
+        run: pnpm test:desktop-git
+
       - name: Collect release artifacts
         run: node scripts/release.mjs collect apps/desktop/out/make release-assets
 

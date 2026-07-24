@@ -3,11 +3,13 @@ packages:
   - "packages/*"
 
 onlyBuiltDependencies:
+  - dugite
   - esbuild
   - lefthook
   - lightningcss
 
 allowBuilds:
+  dugite: true
   esbuild: true
   lefthook: true
   lightningcss: true

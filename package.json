@@ -11,6 +11,7 @@
     "format:check": "oxfmt --check .",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "test:desktop-git": "pnpm --filter desktop exec tsx ../../scripts/desktop-git-smoke.ts out",
     "test:release": "node --test scripts/release-lib.test.mjs",
     "verify": "pnpm test:release && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "eval:wiki": "pnpm --filter @workspace/evals eval:wiki",
@@ -35,6 +36,7 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "dugite",
       "esbuild",
       "lefthook",
       "lightningcss"

@@ -25,6 +25,7 @@
     "./agent/pi": "./src/agent/pi.ts",
     "./agent/pi-credentials": "./src/agent/pi-credentials.ts",
     "./index": "./src/index/index.ts",
+    "./git-runtime": "./src/git-runtime.ts",
     "./update": "./src/update/index.ts",
     "./wiki": "./src/wiki.ts"
   }
